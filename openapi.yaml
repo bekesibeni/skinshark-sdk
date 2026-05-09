@@ -1,0 +1,2797 @@
+openapi: 3.1.0
+info:
+  title: SkinShark Merchant API
+  description: |
+    REST + WebSocket surface that you call **server-to-server** with your API key.
+    Use it to manage sub-users, query wallets and trades, and act on behalf of any
+    of your sub-users from a single key.
+
+    ## Authentication
+
+    Send your API key on every request:
+
+    ```
+    api-key: <your-key>
+    ```
+
+    Keys are hashed at rest and may be restricted to specific source IPs. Requests
+    from a non-allowlisted IP are rejected with `API_KEY_IP_DENIED`.
+
+    ### Acting on behalf of a sub-user
+
+    For routes **outside** `/merchant/...`, add a header to scope the call to a
+    specific sub-user:
+
+    ```
+    On-Behalf-Of: <subUserId | externalId>
+    ```
+
+    Both the UUID and the `externalId` you assigned are accepted; the server
+    resolves either, scoped to your merchant. A UUID that belongs to a different
+    merchant returns `USER_NOT_FOUND`.
+
+    Without `On-Behalf-Of`, calls run **as your merchant account itself**. For
+    example, `POST /market/buy` without the header buys for the merchant — its
+    own spot wallet, its own Steam trade URL.
+
+    ### Route groups
+
+    | Prefix | What it does | `On-Behalf-Of` |
+    |---|---|---|
+    | `/merchant/...` | Merchant-level reads/writes (sub-users, trades aggregation, wallet, profile, fees). | Rejected — sub-users do not hold the merchant role. |
+    | Everything else (`/user/...`, `/market/...`, `/auth/ws-token`) | User-scope operations. | Accepted — call runs as the targeted sub-user. |
+
+    Each operation states the required context under **Auth context**.
+
+    ## Dashboard-only operations
+
+    A few account-management operations are not exposed to API key auth — they
+    require signing in to the merchant dashboard:
+
+    - Creating, rotating, and revoking API keys
+    - Configuring webhook endpoints, secrets, and inspecting deliveries
+    - Adjusting merchant fees
+    - Account settings (password, email, 2FA, account deletion)
+    - Audit logs and CSV exports
+
+    Everything else in this document is available via API key.
+
+    ## Response envelope
+
+    Every JSON response is wrapped. Successful responses:
+
+    ```json
+    {
+      "requestId": "req-...",
+      "success": true,
+      "data": { }
+    }
+    ```
+
+    Error responses:
+
+    ```json
+    {
+      "requestId": "req-...",
+      "success": false,
+      "error": {
+        "code": 1500,
+        "key": "INSUFFICIENT_BALANCE",
+        "message": "Insufficient balance"
+      }
+    }
+    ```
+
+    Schemas below describe only the inner `data` shape — the envelope is implicit.
+
+    ## Money format
+
+    - Fields suffixed `Cents` are integer cents as JSON numbers
+      (`15000` = $150.00).
+    - Decimal-currency fields like `balance`, `totalPrice`, `gmv` are JSON numbers
+      in the wallet currency (`5.23` = $5.23 in a USD wallet).
+    - Amount **inputs** (e.g. `fund`, deposit `amount`) accept decimal strings
+      (`"5.50"`) to avoid floating-point loss on the wire.
+
+    ## Pagination
+
+    Two styles are used, documented per endpoint:
+
+    - **Page-based** — `?page=1&limit=25`. Response contains
+      `{ items|users, total, page, limit, totalPages }`.
+    - **Cursor-based** — `?cursor=<id>&limit=25`. Response contains
+      `{ items|trades|transactions, nextCursor }`. `nextCursor` is `null` on the
+      last page.
+
+    ## Idempotency
+
+    `POST /merchant/users/{id}/fund` requires an `Idempotency-Key` header. Replays
+    with the same key return `idempotent: true` alongside the original
+    transaction id, so retries are safe.
+
+    ## Sub-user identifiers
+
+    Anywhere a sub-user is referenced — the `On-Behalf-Of` header, `{id}` path
+    params under `/merchant/users/...`, the `subUserId` filter on trade lists —
+    the value can be **either**:
+
+    - the sub-user's UUID, or
+    - the `externalId` you assigned.
+
+    The server resolves both, scoped to your merchant.
+  version: "0.3.0"
+  contact:
+    name: SkinShark Engineering
+    email: support@skinshark.gg
+  license:
+    name: Proprietary
+    url: https://skinshark.gg/terms
+
+servers:
+  - url: https://api.skinshark.gg
+    description: Production
+  - url: https://api-staging.skinshark.gg
+    description: Staging
+
+tags:
+  - name: Account
+    description: Merchant identity, fees, stats, wallet, ledger. Merchant context only.
+  - name: Users
+    description: Sub-user CRUD plus per-user wallet, ledger, trades, and funding. Merchant context only.
+  - name: Trades
+    description: Aggregate trade list across all sub-users. Merchant context only.
+  - name: Profile
+    description: Read the actor's profile (Steam link, Discord link, wallet snapshot). Merchant or sub-user context.
+  - name: Trade URLs
+    description: Manage Steam trade URLs for the actor. Merchant or sub-user context.
+  - name: Wallet
+    description: Actor's spot balance and ledger. Merchant or sub-user context.
+  - name: Deposits
+    description: Fund the actor's wallet via Gate Pay, on-ramp (card), or self-hosted EVM crypto. Merchant or sub-user context.
+  - name: Market
+    description: Catalog search, listings, buy / quick-buy, and the actor's own trades. Merchant or sub-user context.
+  - name: WebSocket
+    description: Real-time trade and deposit events for a single sub-user (consumer-facing). Sub-user context only.
+
+security:
+  - apiKeyAuth: []
+
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: api-key
+      description: |
+        Your raw API key. Generate, rotate, and revoke keys from the merchant
+        dashboard. Keys can optionally be bound to one or more allowed source
+        IPs — requests from any other IP are rejected with `API_KEY_IP_DENIED`.
+
+  parameters:
+    OnBehalfOf:
+      name: On-Behalf-Of
+      in: header
+      description: |
+        Sub-user UUID **or** the merchant's `externalId` for that sub-user.
+        Required for sub-user-context routes; rejected (via `requireMerchant`)
+        on merchant-context routes.
+      required: false
+      schema: { type: string, minLength: 1, maxLength: 128 }
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: |
+        Required for `POST /merchant/users/:id/fund`. Scope is
+        `merchant:<merchantId>:<key>`. Replay with the same key returns the
+        original transaction with `idempotent: true`.
+      required: true
+      schema: { type: string, minLength: 1 }
+
+  schemas:
+    # ─────────────────────────────────────────────────────────────────────
+    # Envelope and error
+    # ─────────────────────────────────────────────────────────────────────
+    Envelope:
+      type: object
+      required: [requestId, success]
+      properties:
+        requestId: { type: string }
+        success: { type: boolean }
+        data:
+          description: 'Present when `success: true`. Shape varies per endpoint.'
+        error: { $ref: '#/components/schemas/Error' }
+
+    Error:
+      type: object
+      required: [code, key, message]
+      properties:
+        code: { type: integer, example: 1500 }
+        key: { type: string, example: INSUFFICIENT_BALANCE }
+        message: { type: string, example: Insufficient balance }
+      additionalProperties: true
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Enums (mirror prisma/schema.prisma)
+    # ─────────────────────────────────────────────────────────────────────
+    Currency: { type: string, enum: [USD, EUR] }
+    UserStatus: { type: string, enum: [active, suspended, deleted] }
+    Role: { type: string, enum: [user, merchant, admin] }
+    TwoFactorMethod: { type: string, enum: [email, totp] }
+    WalletType:
+      type: string
+      enum: [spot, earnings]
+      description: |
+        - `spot` — funds available to spend or fund sub-users.
+        - `earnings` — merchant-only treasury wallet credited at trade settlement.
+    WalletStatus: { type: string, enum: [active, suspended, closed] }
+    TradeStatus:
+      type: string
+      enum: [INITIATED, PENDING, ACTIVE, HOLD, COMPLETED, FAILED, REVERTED]
+    DepositStatus:
+      type: string
+      enum: [initiated, pending, completed, partial, expired, cancelled, refunded, failed]
+    DepositMethod: { type: string, enum: [gatepay, onramp, crypto] }
+    DepositCurrency:
+      type: string
+      enum: [USDT, USDC, DAI, BTC, ETH, SOL]
+    OnrampPayCurrency: { type: string, enum: [USD, EUR, GBP] }
+    CryptoEvmChain:
+      type: string
+      enum: [ethereum, base, arbitrum, optimism, bsc]
+    CryptoNativeToken:
+      type: string
+      enum: [USDT, USDC, NATIVE]
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Merchant profile / fees / stats
+    # ─────────────────────────────────────────────────────────────────────
+    MerchantProfile:
+      type: object
+      required:
+        [id, email, emailVerified, country, roles, twoFactorEnabled, twoFactorMethod, feeBps, merchantFeeBps, childDefaultFeeBps, wallets, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        emailVerified: { type: boolean }
+        country: { type: [string, "null"] }
+        roles:
+          type: array
+          items: { type: string }
+        twoFactorEnabled: { type: boolean }
+        twoFactorMethod: { type: [string, "null"] }
+        feeBps:
+          type: integer
+          description: House fee on the merchant's *own* buys (rarely used).
+        merchantFeeBps:
+          type: integer
+          description: |
+            Merchant's cut on each sub-user trade (added on top of the sub-user's
+            `feeBps`). 0–5000 basis points.
+        childDefaultFeeBps:
+          type: [integer, "null"]
+          description: Default house fee inherited by new sub-users; null falls back to global default.
+        wallets:
+          type: object
+          required: [spot, earnings]
+          properties:
+            spot:
+              type: [object, "null"]
+              properties:
+                currency: { type: string }
+                balance: { type: number, minimum: 0 }
+            earnings:
+              type: [object, "null"]
+              properties:
+                currency: { type: string }
+                balance: { type: number, minimum: 0 }
+        createdAt: { type: string }
+
+    FeesResponse:
+      type: object
+      required: [merchantFeeBps, childDefaultFeeBps, globalDefaultFeeBps, effectiveChildFeeBps]
+      properties:
+        merchantFeeBps: { type: integer }
+        childDefaultFeeBps: { type: [integer, "null"] }
+        globalDefaultFeeBps: { type: integer }
+        effectiveChildFeeBps:
+          type: integer
+          description: childDefaultFeeBps if set, else globalDefaultFeeBps.
+
+    StatsResponse:
+      type: object
+      required: [totals, bySubUser, byStatus]
+      properties:
+        totals:
+          type: object
+          required: [tradeCount, gmv, gmvCents, feesEarnedCents, feesEarned, spotBalance, earningsBalance, currency]
+          properties:
+            tradeCount: { type: integer }
+            gmv: { type: number }
+            gmvCents: { type: integer, description: GMV in USD cents. }
+            feesEarnedCents: { type: integer }
+            feesEarned: { type: number }
+            spotBalance: { type: number }
+            earningsBalance: { type: number }
+            currency: { type: [string, "null"] }
+        bySubUser:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            required: [subUserId, email, externalId, tradeCount, gmvCents, gmv, balance, feesContributedCents]
+            properties:
+              subUserId: { type: string }
+              email: { type: [string, "null"] }
+              externalId: { type: [string, "null"] }
+              tradeCount: { type: integer }
+              gmvCents: { type: integer }
+              gmv: { type: number }
+              balance: { type: number }
+              feesContributedCents: { type: integer }
+        byStatus:
+          type: object
+          additionalProperties: { type: integer }
+          description: Map of TradeStatus → count.
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Sub-users
+    # ─────────────────────────────────────────────────────────────────────
+    SubUserListItem:
+      type: object
+      required: [id, email, steamId, externalId, status, feeBps, currency, balance, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: [string, "null"] }
+        steamId: { type: [string, "null"] }
+        externalId: { type: [string, "null"] }
+        status: { $ref: '#/components/schemas/UserStatus' }
+        feeBps: { type: [integer, "null"] }
+        currency:
+          type: [string, "null"]
+          enum: [USD, EUR, null]
+        balance: { type: number }
+        createdAt: { type: string, format: date-time }
+
+    SubUserListResponse:
+      type: object
+      required: [items, total, page, limit, totalPages]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SubUserListItem' }
+        total: { type: integer }
+        page: { type: integer }
+        limit: { type: integer }
+        totalPages: { type: integer }
+
+    CreateSubUserBody:
+      type: object
+      additionalProperties: false
+      description: Provide at least one of `email` or `steamId`.
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        steamId:
+          type: string
+          pattern: '^7656119\d{10}$'
+          description: SteamID64.
+        externalId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Your own stable identifier. Doubles as an `On-Behalf-Of` value.
+        currency: { $ref: '#/components/schemas/Currency' }
+
+    CreateSubUserResponse:
+      type: object
+      required: [id, email, steamId, externalId, status, feeBps, createdAt, currency, idempotent]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: [string, "null"] }
+        steamId: { type: [string, "null"] }
+        externalId: { type: [string, "null"] }
+        status: { $ref: '#/components/schemas/UserStatus' }
+        feeBps: { type: [integer, "null"] }
+        createdAt: { type: string, format: date-time }
+        currency: { $ref: '#/components/schemas/Currency' }
+        idempotent:
+          type: boolean
+          description: |
+            True when the response replays a prior successful create with the
+            same `externalId`. The returned user is the existing one — no new
+            sub-user was created.
+
+    SubUserResponse:
+      type: object
+      required: [id, email, steamId, externalId, status, feeBps, createdAt, wallet]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: [string, "null"] }
+        steamId: { type: [string, "null"] }
+        externalId: { type: [string, "null"] }
+        status: { $ref: '#/components/schemas/UserStatus' }
+        feeBps: { type: [integer, "null"] }
+        createdAt: { type: string, format: date-time }
+        wallet:
+          oneOf:
+            - type: object
+              required: [type, status, currency, balance]
+              properties:
+                type: { $ref: '#/components/schemas/WalletType' }
+                status: { $ref: '#/components/schemas/WalletStatus' }
+                currency:
+                  oneOf:
+                    - $ref: '#/components/schemas/Currency'
+                    - type: "null"
+                balance: { type: number }
+            - type: "null"
+
+    FundBody:
+      type: object
+      required: [amount]
+      additionalProperties: false
+      properties:
+        amount:
+          type: string
+          pattern: '^\d+(\.\d{1,2})?$'
+          description: Decimal in the merchant's currency. Sub-user must use the same currency.
+
+    FundResponse:
+      type: object
+      required: [transactionId, idempotent]
+      properties:
+        transactionId: { type: string, format: uuid }
+        idempotent:
+          type: boolean
+          description: True when the response replays a prior call with the same Idempotency-Key.
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Wallet shapes
+    # ─────────────────────────────────────────────────────────────────────
+    WalletBalance:
+      type: object
+      description: Sub-user wallet shape returned by `/user/wallet/balance`.
+      required: [currency, balance]
+      properties:
+        currency: { $ref: '#/components/schemas/Currency' }
+        balance: { type: number, minimum: 0 }
+
+    MerchantWallet:
+      type: object
+      description: Richer shape returned by `/merchant/wallet`.
+      required: [walletId, type, currency, balance]
+      properties:
+        walletId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/WalletType' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        balance: { type: number }
+
+    TransactionItem:
+      type: object
+      required: [id, type, description, status, amount, occurredAt, externalRef]
+      properties:
+        id: { type: string }
+        type:
+          type: string
+          description: |
+            Examples: `merchant_fund`, `trade_payment`, `trade_cost`, `trade_refund`,
+            `settle_house`, `settle_merchant`, `deposit_credit`.
+        description: { type: string }
+        status: { type: string, enum: [posted, reversed] }
+        amount:
+          type: number
+          description: Signed delta in wallet currency (positive = credit, negative = debit).
+        occurredAt: { type: string, format: date-time }
+        externalRef: { type: [string, "null"] }
+
+    TransactionHistory:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TransactionItem' }
+        nextCursor: { type: [string, "null"] }
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Deposits — Gate Pay (gateway-hosted crypto)
+    # ─────────────────────────────────────────────────────────────────────
+    DepositChainsResponse:
+      type: object
+      required: [currencies]
+      properties:
+        currencies:
+          type: array
+          items:
+            type: object
+            required: [currency, chains, isStable, minDepositUsd]
+            properties:
+              currency: { $ref: '#/components/schemas/DepositCurrency' }
+              chains:
+                type: array
+                items: { type: string }
+              isStable: { type: boolean }
+              minDepositUsd: { type: number, minimum: 0 }
+
+    DepositQuoteBody:
+      type: object
+      required: [currency, amount]
+      additionalProperties: false
+      properties:
+        currency: { $ref: '#/components/schemas/DepositCurrency' }
+        amount:
+          type: string
+          pattern: '^\d+(\.\d{1,2})?$'
+          description: Decimal USD amount.
+
+    DepositQuoteResponse:
+      type: object
+      required:
+        [token, currency, payAmountToken, receiveAmountUsd, receiveAmount, fee, exchangeRate, quoteToken, expiresIn]
+      properties:
+        token: { $ref: '#/components/schemas/DepositCurrency' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        payAmountToken: { type: number, minimum: 0 }
+        receiveAmountUsd: { type: number, minimum: 0 }
+        receiveAmount: { type: number, minimum: 0 }
+        fee: { type: number, minimum: 0 }
+        exchangeRate: { type: number, minimum: 0 }
+        quoteToken:
+          type: string
+          description: Pass to `POST /user/wallet/deposit/gate` to commit.
+        expiresIn: { type: string, example: "5m" }
+
+    CreateDepositBody:
+      type: object
+      required: [quoteToken, chain]
+      additionalProperties: false
+      properties:
+        quoteToken: { type: string }
+        chain: { type: string, minLength: 1, maxLength: 30 }
+
+    CreateDepositResponse:
+      type: object
+      required:
+        [fundingId, status, currency, payAmountToken, receiveAmountUsd, receiveAmount, exchangeRate, fee, expireTime, whitelabelUrl, onChain]
+      properties:
+        fundingId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/DepositStatus' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        payAmountToken: { type: number }
+        receiveAmountUsd: { type: number }
+        receiveAmount: { type: number }
+        exchangeRate: { type: number }
+        fee: { type: number }
+        expireTime: { type: [integer, "null"] }
+        whitelabelUrl: { type: [string, "null"], format: uri }
+        onChain:
+          type: object
+          required: [network, token, address]
+          properties:
+            network: { type: string }
+            token: { $ref: '#/components/schemas/DepositCurrency' }
+            address: { type: string }
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Deposits — On-ramp (card)
+    # ─────────────────────────────────────────────────────────────────────
+    OnrampQuoteBody:
+      type: object
+      required: [payCurrency]
+      additionalProperties: false
+      description: Provide either `payAmount` or `receiveAmount`.
+      properties:
+        payAmount: { type: number, exclusiveMinimum: 0 }
+        receiveAmount: { type: number, exclusiveMinimum: 0 }
+        payCurrency: { $ref: '#/components/schemas/OnrampPayCurrency' }
+
+    OnrampQuoteResponse:
+      type: object
+      required:
+        [currency, payAmount, receiveAmount, receiveAmountUsd, payCurrency, exchangeRate, fees]
+      properties:
+        currency: { $ref: '#/components/schemas/Currency' }
+        payAmount: { type: number }
+        receiveAmount: { type: number }
+        receiveAmountUsd: { type: number }
+        payCurrency: { $ref: '#/components/schemas/OnrampPayCurrency' }
+        exchangeRate: { type: number }
+        fees:
+          type: object
+          required: [onrampFee, clientFee, gatewayFee, gasFee]
+          properties:
+            onrampFee: { type: number }
+            clientFee: { type: number }
+            gatewayFee: { type: number }
+            gasFee: { type: number }
+
+    OnrampSessionBody:
+      allOf:
+        - $ref: '#/components/schemas/OnrampQuoteBody'
+        - type: object
+          properties:
+            redirectUrl: { type: string, format: uri }
+
+    OnrampSessionResponse:
+      type: object
+      required:
+        [fundingId, status, currency, payAmount, receiveAmount, receiveAmountUsd, payCurrency, exchangeRate, whitelabelUrl]
+      properties:
+        fundingId: { type: string, format: uuid }
+        status: { type: string, enum: [initiated, completed, failed] }
+        currency: { $ref: '#/components/schemas/Currency' }
+        payAmount: { type: number }
+        receiveAmount: { type: number }
+        receiveAmountUsd: { type: number }
+        payCurrency: { $ref: '#/components/schemas/OnrampPayCurrency' }
+        exchangeRate: { type: number }
+        whitelabelUrl:
+          type: string
+          format: uri
+          description: Redirect the sub-user here to complete card payment.
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Deposits — Self-hosted EVM crypto
+    # ─────────────────────────────────────────────────────────────────────
+    CryptoAddressResponse:
+      type: object
+      required: [address, chains, tokens]
+      properties:
+        address:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+          description: Same EVM address across all supported chains.
+        chains:
+          type: array
+          items: { $ref: '#/components/schemas/CryptoEvmChain' }
+        tokens:
+          type: array
+          items: { $ref: '#/components/schemas/CryptoNativeToken' }
+
+    CryptoQuoteBody:
+      type: object
+      required: [token, amount]
+      additionalProperties: false
+      properties:
+        token: { type: string, enum: [USDT, USDC] }
+        amount: { type: number, exclusiveMinimum: 0, maximum: 10000000 }
+
+    CryptoQuoteChainPreview:
+      type: object
+      required: [feeCents, receiveAmountUsd, receiveAmount, gasGwei]
+      properties:
+        feeCents: { type: integer }
+        receiveAmountUsd: { type: number }
+        receiveAmount: { type: number }
+        gasGwei: { type: number }
+
+    CryptoQuoteResponse:
+      type: object
+      required: [token, amount, walletCurrency, exchangeRate, feeBps, chains]
+      properties:
+        token: { type: string }
+        amount: { type: number }
+        walletCurrency: { $ref: '#/components/schemas/Currency' }
+        exchangeRate: { type: number }
+        feeBps: { type: integer }
+        chains:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/CryptoQuoteChainPreview' }
+          description: Map of `CryptoEvmChain` → preview (fees, gas, receive amount).
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Universal deposit cancel/resume
+    # ─────────────────────────────────────────────────────────────────────
+    CancelDepositResponse:
+      type: object
+      required: [depositId, status]
+      properties:
+        depositId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/DepositStatus' }
+
+    ResumeDepositResponse:
+      type: object
+      required: [fundingId, status, method, currency, amount, whitelabelUrl]
+      properties:
+        fundingId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/DepositStatus' }
+        method: { $ref: '#/components/schemas/DepositMethod' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        amount: { type: number, minimum: 0 }
+        whitelabelUrl: { type: [string, "null"] }
+        onChain:
+          type: [object, "null"]
+          properties:
+            network: { type: string }
+            token: { type: string }
+            address: { type: string }
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Sub-user profile + Steam trade URLs
+    # ─────────────────────────────────────────────────────────────────────
+    UserProfile:
+      type: object
+      required: [id, email, emailVerified, country, roles, twoFactorEnabled, twoFactorMethod, steam, discord, wallet, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        emailVerified: { type: boolean }
+        country: { type: [string, "null"] }
+        roles:
+          type: array
+          items: { $ref: '#/components/schemas/Role' }
+        twoFactorEnabled: { type: boolean }
+        twoFactorMethod:
+          oneOf:
+            - $ref: '#/components/schemas/TwoFactorMethod'
+            - type: "null"
+        steam:
+          type: [object, "null"]
+          properties:
+            steamId: { type: string }
+            personaName: { type: [string, "null"] }
+            avatarUrl: { type: [string, "null"] }
+            profileUrl: { type: [string, "null"] }
+            tradeUrl: { type: string }
+        discord:
+          type: [object, "null"]
+          properties:
+            discordId: { type: string }
+            username: { type: string }
+            avatar: { type: [string, "null"] }
+        wallet:
+          type: [object, "null"]
+          properties:
+            currency: { $ref: '#/components/schemas/Currency' }
+            balance: { type: number, minimum: 0 }
+        createdAt: { type: string }
+
+    AddTradeUrlBody:
+      type: object
+      required: [url]
+      additionalProperties: false
+      properties:
+        url:
+          type: string
+          pattern: '^https:\/\/(www\.)?steamcommunity\.com\/tradeoffer\/new\/?'
+          description: Full Steam trade-offer URL (with `partner=` and `token=`).
+
+    UpdateTradeUrlBody:
+      type: object
+      additionalProperties: false
+      description: Provide at least one of `url` or `isPrimary`.
+      properties:
+        url:
+          type: string
+          pattern: '^https:\/\/(www\.)?steamcommunity\.com\/tradeoffer\/new\/?'
+        isPrimary: { type: boolean }
+
+    TradeUrlResponse:
+      type: object
+      required: [id, url, steamId, personaName, avatarUrl, profileUrl, isPrimary, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string }
+        steamId: { type: string }
+        personaName: { type: [string, "null"] }
+        avatarUrl: { type: [string, "null"] }
+        profileUrl: { type: [string, "null"] }
+        isPrimary: { type: boolean }
+        createdAt: { type: string }
+
+    TradeUrlListResponse:
+      type: array
+      items: { $ref: '#/components/schemas/TradeUrlResponse' }
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Catalog
+    # ─────────────────────────────────────────────────────────────────────
+    SuggestionItem:
+      type: object
+      required: [id, marketHashName, iconUrl]
+      properties:
+        id: { type: string }
+        marketHashName: { type: string }
+        iconUrl: { type: string }
+        rarity: { type: string }
+        rarityColor: { type: string }
+        itemType: { type: string }
+
+    SuggestionsResponse:
+      type: array
+      items: { $ref: '#/components/schemas/SuggestionItem' }
+
+    SearchResultItem:
+      type: object
+      required: [id, name, marketHashName]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        marketHashName: { type: string }
+        itemType: { type: string }
+        iconUrl: { type: string }
+        weapon: { type: string }
+        wear: { type: string }
+        rarity: { type: string }
+        rarityColor: { type: string }
+        category: { type: string, enum: [Normal, StatTrak, Souvenir] }
+        collection: { type: string }
+        floatRange:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items: { type: number }
+        price: { type: number }
+        listingsCount: { type: number }
+        steamPrice: { type: number }
+
+    SearchResponse:
+      type: object
+      required: [items, total, page, limit, totalPages]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SearchResultItem' }
+        total: { type: integer }
+        page: { type: integer }
+        limit: { type: integer }
+        totalPages: { type: integer }
+
+    ItemDetail:
+      type: object
+      required: [id, name, marketHashName, itemType, iconUrl, description, price, listingsCount, steamPrice]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        marketHashName: { type: string }
+        itemType: { type: [string, "null"] }
+        iconUrl: { type: [string, "null"] }
+        weapon: { type: string }
+        wear: { type: string }
+        rarity: { type: string }
+        rarityColor: { type: string }
+        category: { type: string }
+        collection: { type: string }
+        floatRange:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items: { type: number }
+        floatBuckets:
+          type: array
+          items:
+            type: object
+            required: [min, max]
+            properties:
+              min: { type: number }
+              max: { type: number }
+        paintIndex: { type: number }
+        description: { type: [string, "null"] }
+        tags:
+          type: array
+          items: { type: string }
+        containedItems:
+          type: array
+          items: { type: string }
+        phases:
+          type: array
+          items:
+            type: object
+            required: [name, iconUrl]
+            properties:
+              name: { type: string }
+              iconUrl: { type: [string, "null"] }
+        price: { type: [number, "null"] }
+        listingsCount: { type: [number, "null"] }
+        steamPrice: { type: [number, "null"] }
+
+    ItemDetailResponse:
+      type: object
+      required: [item]
+      properties:
+        item: { $ref: '#/components/schemas/ItemDetail' }
+        offersOverview:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              price: { type: [number, "null"] }
+              listingsCount: { type: [number, "null"] }
+          description: |
+            Per-marketplace price + count breakdown for this item. Keys are marketplace IDs.
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Listings
+    # ─────────────────────────────────────────────────────────────────────
+    MarketListing:
+      type: object
+      required: [id, marketHashName, name, type, iconUrl, price]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 'Pass to `POST /market/buy` items[].listingId.'
+        marketHashName: { type: string }
+        name: { type: string }
+        type: { type: string }
+        iconUrl: { type: string }
+        price: { type: number }
+        referencePrice: { type: number }
+        exterior: { type: string }
+        rarity: { type: string }
+        collection: { type: string }
+        color: { type: string }
+        wear: { type: [string, "null"] }
+        paintSeed: { type: [number, "null"] }
+        doppler:
+          type: object
+          required: [status, name]
+          properties:
+            status: { type: number }
+            name: { type: string }
+            paintIndex: { type: number }
+        fade:
+          type: object
+          required: [percentage]
+          properties:
+            percentage: { type: number }
+        hardened:
+          type: object
+          required: [status, name]
+          properties:
+            status: { type: number }
+            name: { type: string }
+        stickers:
+          type: array
+          items:
+            type: object
+            required: [name, slot, iconUrl]
+            properties:
+              name: { type: string }
+              marketHashName: { type: string }
+              slot: { type: number }
+              wear: { type: number }
+              iconUrl: { type: string }
+        charm:
+          type: object
+          required: [name, iconUrl]
+          properties:
+            name: { type: string }
+            marketHashName: { type: string }
+            pattern: { type: string }
+            iconUrl: { type: string }
+        inspectUrl: { type: string }
+        delivery: { type: string }
+
+    ListingsResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/MarketListing' }
+        total: { type: integer }
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Trades
+    # ─────────────────────────────────────────────────────────────────────
+    BuyItem:
+      type: object
+      required: [listingId, maxPrice]
+      additionalProperties: false
+      properties:
+        listingId:
+          type: string
+          format: uuid
+          description: From `MarketListing.id`.
+        maxPrice:
+          type: string
+          pattern: '^\d+(\.\d{1,2})?$'
+          description: Max acceptable unit price (decimal). Reject if listing price drifted.
+
+    BuyBody:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items: { $ref: '#/components/schemas/BuyItem' }
+        tradeUrl:
+          type: string
+          format: uri
+          description: |
+            Override the sub-user's primary Steam trade URL for this purchase. Optional.
+        externalId:
+          type: string
+          maxLength: 128
+          description: Your own correlation id, echoed back on the Trade.
+
+    BuyResponse:
+      type: object
+      required: [id, status, itemCount, totalPrice, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/TradeStatus' }
+        itemCount: { type: integer }
+        totalPrice: { type: number }
+        createdAt: { type: string }
+
+    QuickBuyBody:
+      type: object
+      required: [itemId, maxPrice, amount, delivery]
+      additionalProperties: false
+      properties:
+        itemId:
+          type: string
+          description: Item id from catalog (`SearchResultItem.id` or `ItemDetail.id`).
+        maxPrice:
+          type: string
+          pattern: '^\d+(\.\d{1,2})?$'
+          description: Max acceptable unit price (decimal).
+        amount:
+          type: integer
+          minimum: 1
+          maximum: 200
+          description: Requested unit count. The server picks the cheapest matching listings.
+        delivery:
+          type: string
+          enum: [STANDARD, INSTANT]
+        tradeUrl: { type: string, format: uri }
+        externalId: { type: string, maxLength: 128 }
+
+    QuickBuyResponse:
+      type: object
+      required: [id, status, requestedCount, itemCount, totalPrice, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/TradeStatus' }
+        requestedCount: { type: integer }
+        itemCount:
+          type: integer
+          description: Actual count purchased (may be less than requested if supply ran out).
+        totalPrice: { type: number }
+        createdAt: { type: string }
+
+    TradeItem:
+      type: object
+      required: [id, name, marketHashName, type, iconUrl, price]
+      properties:
+        id: { type: string }
+        name: { type: [string, "null"] }
+        marketHashName: { type: [string, "null"] }
+        type: { type: [string, "null"] }
+        iconUrl: { type: [string, "null"] }
+        price: { type: number }
+        exterior: { type: string }
+        rarity: { type: string }
+        color: { type: string }
+        phase: { type: string }
+        wear: { type: string }
+        paintSeed: { type: number }
+        stickers:
+          type: array
+          items:
+            type: object
+            required: [name, slot, iconUrl]
+            properties:
+              name: { type: string }
+              slot: { type: number }
+              wear: { type: number }
+              iconUrl: { type: string }
+        charm:
+          type: object
+          required: [name, iconUrl]
+          properties:
+            name: { type: string }
+            pattern: { type: string }
+            iconUrl: { type: string }
+        delivery: { type: string }
+        status:
+          type: string
+          description: Per-item purchase status (uppercase).
+        tradable: { type: boolean }
+        error: { type: string }
+
+    Trade:
+      type: object
+      required:
+        [id, type, userId, steamId, tradeUrl, status, game, items, summary, totalPrice, currency, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, example: BUY }
+        userId: { type: string }
+        steamId: { type: string }
+        tradeUrl: { type: string }
+        offerId: { type: string }
+        externalId: { type: string }
+        status: { $ref: '#/components/schemas/TradeStatus' }
+        game: { type: string, example: "730" }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TradeItem' }
+        summary:
+          type: object
+          required: [total, completed, failed]
+          properties:
+            total: { type: number }
+            completed: { type: number }
+            failed: { type: number }
+        totalPrice: { type: number }
+        currency: { $ref: '#/components/schemas/Currency' }
+        holdEndDate: { type: string, format: date-time }
+        settledAt: { type: string, format: date-time }
+        revertedBy: { type: string, enum: [SUPPLIER, USER] }
+        error: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    TransactionListResponse:
+      type: object
+      description: Sub-user transaction list (`/market/trades`). Cursor-paginated.
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Trade' }
+        nextCursor: { type: [string, "null"] }
+
+    MerchantTradeListResponse:
+      type: object
+      description: Merchant-scope trade list (`/merchant/trades`, `/merchant/users/:id/trades`).
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Trade' }
+        nextCursor: { type: [string, "null"] }
+
+    CancelItemResponse:
+      type: object
+      required: [ok, itemId, status]
+      properties:
+        ok: { type: boolean, enum: [true] }
+        itemId: { type: string, format: uuid }
+        status: { type: string, enum: [cancelled, failed] }
+
+    # ─────────────────────────────────────────────────────────────────────
+    # WebSocket
+    # ─────────────────────────────────────────────────────────────────────
+    WsTokenResponse:
+      type: object
+      required: [token, expiresIn]
+      properties:
+        token:
+          type: string
+          description: Short-lived JWT (1h). Pass as `?token=<token>` query string when opening `/ws`.
+        expiresIn: { type: string, example: "1h" }
+
+    WsConnectedEvent:
+      type: object
+      description: First frame the server sends after a successful upgrade.
+      required: [event, data, ts]
+      properties:
+        event: { type: string, enum: [connected] }
+        data:
+          type: object
+          required: [userId]
+          properties:
+            userId: { type: string, format: uuid }
+        ts: { type: integer, description: Unix epoch milliseconds. }
+
+    WsDepositTransferEvent:
+      type: object
+      description: |
+        Gateway transfer detected on-chain (gatepay). `status: pending`.
+        Replaced by `deposit.completed` once the gateway settles the credit.
+      required: [event, data, ts]
+      properties:
+        event: { type: string, enum: [deposit.transfer] }
+        data:
+          type: object
+          required: [fundingId, status, transfer]
+          properties:
+            fundingId: { type: string, format: uuid }
+            status: { type: string, enum: [pending] }
+            transfer:
+              type: object
+              required: [txHash, amount, chain]
+              properties:
+                txHash: { type: string }
+                amount: { type: number }
+                chain: { type: string }
+        ts: { type: integer }
+
+    WsGatewayDepositCompletedEvent:
+      type: object
+      description: Gatepay or on-ramp deposit credited.
+      required: [event, data, ts]
+      properties:
+        event: { type: string, enum: [deposit.completed] }
+        data:
+          type: object
+          required: [fundingId, status, payAmountToken, receiveAmountUsd, completedAt]
+          properties:
+            fundingId: { type: string, format: uuid }
+            status: { type: string, enum: [completed] }
+            payAmountToken: { type: number }
+            receiveAmountUsd: { type: number }
+            completedAt: { type: string, format: date-time }
+        ts: { type: integer }
+
+    WsDepositFailedEvent:
+      type: object
+      required: [event, data, ts]
+      properties:
+        event: { type: string, enum: [deposit.failed] }
+        data:
+          type: object
+          required: [fundingId, status, reason]
+          properties:
+            fundingId: { type: string, format: uuid }
+            status: { type: string, enum: [expired, failed, partial] }
+            reason: { type: string }
+        ts: { type: integer }
+
+    WsDepositRefundedEvent:
+      type: object
+      required: [event, data, ts]
+      properties:
+        event: { type: string, enum: [deposit.refunded] }
+        data:
+          type: object
+          required: [fundingId, status]
+          properties:
+            fundingId: { type: string, format: uuid }
+            status: { type: string, enum: [refunded] }
+        ts: { type: integer }
+
+    WsCryptoDepositPendingEvent:
+      type: object
+      description: Self-hosted crypto deposit detected; awaiting confirmations.
+      required: [event, data, ts]
+      properties:
+        event: { type: string, enum: [deposit.pending] }
+        data:
+          type: object
+          required: [depositId, chain, token, txHash, amountWei]
+          properties:
+            depositId: { type: string, format: uuid }
+            chain: { type: [string, "null"] }
+            token: { type: [string, "null"] }
+            txHash: { type: [string, "null"] }
+            amountWei: { type: string, description: bigint as decimal string. }
+        ts: { type: integer }
+
+    WsCryptoDepositCreditedEvent:
+      type: object
+      description: Self-hosted crypto deposit credited.
+      required: [event, data, ts]
+      properties:
+        event: { type: string, enum: [deposit.completed] }
+        data:
+          type: object
+          required: [depositId, chain, token, txHash, amountWei, amountUsdCents, confirmations, completedAt]
+          properties:
+            depositId: { type: string, format: uuid }
+            chain: { type: [string, "null"] }
+            token: { type: [string, "null"] }
+            txHash: { type: [string, "null"] }
+            amountWei: { type: string }
+            amountUsdCents: { type: string }
+            confirmations: { type: integer }
+            completedAt: { type: string, format: date-time }
+        ts: { type: integer }
+
+    WsCryptoDepositFailedEvent:
+      type: object
+      description: Self-hosted crypto deposit could not be credited (e.g. unsupported token).
+      required: [event, data, ts]
+      properties:
+        event: { type: string, enum: [deposit.failed] }
+        data:
+          type: object
+          required: [depositId, chain, token, txHash, reason, confirmations]
+          properties:
+            depositId: { type: string, format: uuid }
+            chain: { type: [string, "null"] }
+            token: { type: [string, "null"] }
+            txHash: { type: [string, "null"] }
+            reason: { type: string }
+            confirmations: { type: integer }
+        ts: { type: integer }
+
+    WsTradeUpdateEvent:
+      type: object
+      description: |
+        Fired on every trade status change including `pending`/`initiated`. Webhook
+        events are a narrower subset.
+      required: [event, data, ts]
+      properties:
+        event:
+          type: string
+          description: '`trade.<status>` — e.g. `trade.completed`, `trade.failed`.'
+          example: trade.completed
+        data: { $ref: '#/components/schemas/Trade' }
+        ts: { type: integer }
+
+    WsSystemNoticeEvent:
+      type: object
+      required: [event, data, ts]
+      properties:
+        event: { type: string, enum: [system.notice] }
+        data:
+          type: object
+          required: [severity, message]
+          properties:
+            severity: { type: string, enum: [info, warning, critical] }
+            message: { type: string }
+        ts: { type: integer }
+
+    WsEvent:
+      description: Discriminated union of every server-pushed frame on `/ws`.
+      oneOf:
+        - $ref: '#/components/schemas/WsConnectedEvent'
+        - $ref: '#/components/schemas/WsDepositTransferEvent'
+        - $ref: '#/components/schemas/WsGatewayDepositCompletedEvent'
+        - $ref: '#/components/schemas/WsDepositFailedEvent'
+        - $ref: '#/components/schemas/WsDepositRefundedEvent'
+        - $ref: '#/components/schemas/WsCryptoDepositPendingEvent'
+        - $ref: '#/components/schemas/WsCryptoDepositCreditedEvent'
+        - $ref: '#/components/schemas/WsCryptoDepositFailedEvent'
+        - $ref: '#/components/schemas/WsTradeUpdateEvent'
+        - $ref: '#/components/schemas/WsSystemNoticeEvent'
+
+  responses:
+    Unauthorized:
+      description: |
+        Missing/invalid credentials. `key` is one of `UNAUTHORIZED`, `MISSING_API_KEY`,
+        `INVALID_API_KEY`, `API_KEY_REVOKED`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+    Forbidden:
+      description: |
+        Authenticated but not authorized. `key` is one of `FORBIDDEN`,
+        `ACCOUNT_SUSPENDED`, `ACCOUNT_DELETED`, `API_KEY_IP_DENIED`,
+        `USER_NOT_OWNED`, `EMAIL_NOT_VERIFIED`. `requireMerchant` routes
+        return `FORBIDDEN` when `On-Behalf-Of` is set (sub-user lacks the
+        merchant role).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+    NotFound:
+      description: Resource not found, or `On-Behalf-Of` references a non-owned user (`USER_NOT_FOUND`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+    ValidationFailed:
+      description: 422 — Zod or business validation failed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+    Conflict:
+      description: 409 — resource conflict (e.g. duplicate sub-user externalId).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+    RateLimited:
+      description: 429 — rate limit exceeded.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PATHS
+# ═════════════════════════════════════════════════════════════════════════════
+paths:
+  # ─────────────────────────────────────────────────────────────────────
+  # MERCHANT PROFILE / FEES / STATS
+  # ─────────────────────────────────────────────────────────────────────
+  /merchant:
+    get:
+      operationId: getMerchantProfile
+      tags: [Account]
+      summary: Get merchant profile
+      description: |
+        **Auth context:** merchant only. `On-Behalf-Of` rejected.
+
+        Returns the merchant's identity, fees, 2FA state, and current
+        spot/earnings balances.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/MerchantProfile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /merchant/fees:
+    get:
+      operationId: getMerchantFees
+      tags: [Account]
+      summary: Read merchant fee configuration
+      description: |
+        **Auth context:** merchant only.
+
+        Returns the merchant's `merchantFeeBps`, the per-merchant default house
+        fee for new sub-users, the global default, and the resolved effective
+        child fee (`childDefaultFeeBps ?? globalDefaultFeeBps`).
+
+        Fee configuration is read-only over the API. To adjust your merchant
+        fee, sign in to the merchant dashboard.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/FeesResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /merchant/stats:
+    get:
+      operationId: getMerchantStats
+      tags: [Account]
+      summary: Aggregate stats (GMV, fees earned, top sub-users, status breakdown)
+      description: |
+        **Auth context:** merchant only.
+
+        Optional `from` / `to` window (ISO date-time). If both omitted, returns
+        all-time totals. `bySubUser` is the top 10 by GMV in the window.
+      parameters:
+        - { name: from, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/StatsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ─────────────────────────────────────────────────────────────────────
+  # SUB-USERS
+  # ─────────────────────────────────────────────────────────────────────
+  /merchant/users:
+    get:
+      operationId: listSubUsers
+      tags: [Users]
+      summary: List sub-users
+      description: '**Auth context:** merchant only.'
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/UserStatus' }
+        - { name: search, in: query, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: externalId, in: query, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SubUserListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createSubUser
+      tags: [Users]
+      summary: Create a sub-user
+      description: |
+        **Auth context:** merchant only. **Rate limit: 100/min.**
+
+        At least one of `email` or `steamId` is required. `externalId` is your
+        own stable identifier and can be used in subsequent calls (path params,
+        `On-Behalf-Of`).
+
+        New sub-users inherit the merchant's `feeBps` (per-merchant default,
+        falling back to the global default).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSubUserBody' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CreateSubUserResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /merchant/users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Sub-user UUID or merchant `externalId`.
+        schema: { type: string, minLength: 1, maxLength: 128 }
+    get:
+      operationId: getSubUser
+      tags: [Users]
+      summary: Get a sub-user
+      description: '**Auth context:** merchant only.'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SubUserResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteSubUser
+      tags: [Users]
+      summary: Soft-delete a sub-user
+      description: |
+        **Auth context:** merchant only. **Rate limit: 30/min.**
+
+        Sub-user is marked deleted; their wallet is closed. Cannot be undone via
+        API. Returns `null` data on success.
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /merchant/users/{id}/suspend:
+    post:
+      operationId: suspendSubUser
+      tags: [Users]
+      summary: Suspend a sub-user
+      description: '**Auth context:** merchant only. **Rate limit: 30/min.** Login + buy blocked while suspended.'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '200':
+          description: Suspended.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /merchant/users/{id}/reactivate:
+    post:
+      operationId: reactivateSubUser
+      tags: [Users]
+      summary: Reactivate a suspended sub-user
+      description: '**Auth context:** merchant only. **Rate limit: 30/min.**'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '200':
+          description: Reactivated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /merchant/users/{id}/fund:
+    post:
+      operationId: fundSubUser
+      tags: [Users]
+      summary: Move funds from merchant spot wallet to sub-user wallet
+      description: |
+        **Auth context:** merchant only. **Rate limit: 100 / 5min.**
+
+        Requires `Idempotency-Key`. Replay returns the original transaction id
+        with `idempotent: true`. The sub-user's wallet currency must match the
+        merchant's spot currency.
+
+        Common error keys:
+        - `INSUFFICIENT_BALANCE` (1500)
+        - `TRANSFER_CURRENCY_MISMATCH` (1520)
+        - `IDEMPOTENCY_KEY_REQUIRED` (1511) / `IDEMPOTENCY_CONFLICT` (1510)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FundBody' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/FundResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ─────────────────────────────────────────────────────────────────────
+  # MERCHANT WALLET
+  # ─────────────────────────────────────────────────────────────────────
+  /merchant/wallet:
+    get:
+      operationId: getMerchantWallet
+      tags: [Account]
+      summary: Read merchant balance (spot or earnings)
+      description: |
+        **Auth context:** merchant only.
+
+        - `type=spot` (default) — funds available to spend / fund sub-users.
+        - `type=earnings` — treasury wallet credited at trade settlement.
+      parameters:
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/WalletType' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/MerchantWallet' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /merchant/ledger:
+    get:
+      operationId: getMerchantLedger
+      tags: [Account]
+      summary: Merchant ledger (cursor-paginated)
+      description: '**Auth context:** merchant only. Postings against the merchant''s spot or earnings wallet.'
+      parameters:
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/WalletType' }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/TransactionHistory' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /merchant/users/{id}/wallet:
+    get:
+      operationId: getSubUserWallet
+      tags: [Users]
+      summary: Read a sub-user's spot wallet
+      description: |
+        **Auth context:** merchant only.
+
+        Sub-users only hold a `spot` wallet, so no `type` query is accepted.
+        Path `id` accepts the sub-user's UUID **or** your `externalId`.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/MerchantWallet' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /merchant/users/{id}/ledger:
+    get:
+      operationId: getSubUserLedger
+      tags: [Users]
+      summary: Sub-user ledger (cursor-paginated)
+      description: |
+        **Auth context:** merchant only.
+
+        Postings against the sub-user's spot wallet. Path `id` accepts the
+        sub-user's UUID **or** your `externalId`. Same response shape as
+        `/merchant/ledger`.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/TransactionHistory' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─────────────────────────────────────────────────────────────────────
+  # MERCHANT TRADES (cross sub-user aggregation)
+  # ─────────────────────────────────────────────────────────────────────
+  /merchant/trades:
+    get:
+      operationId: listMerchantTrades
+      tags: [Trades]
+      summary: List trades across the merchant scope
+      description: |
+        **Auth context:** merchant only. Cursor-paginated.
+
+        Filters: `status`, `subUserId` (UUID or externalId), `itemName`,
+        `externalId` (your trade externalId), `offerId`, `tradeId`, `from`,
+        `to`.
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/TradeStatus' }
+        - { name: subUserId, in: query, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: itemName, in: query, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: externalId, in: query, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: offerId, in: query, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: tradeId, in: query, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: cursor, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/MerchantTradeListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /merchant/trades/{id}:
+    get:
+      operationId: getMerchantTrade
+      tags: [Trades]
+      summary: Get a single trade in merchant scope
+      description: '**Auth context:** merchant only.'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Trade' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /merchant/users/{id}/trades:
+    get:
+      operationId: listSubUserTrades
+      tags: [Users]
+      summary: List trades for a single sub-user
+      description: '**Auth context:** merchant only. Same filters as `/merchant/trades` minus `subUserId`.'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/TradeStatus' }
+        - { name: itemName, in: query, schema: { type: string } }
+        - { name: externalId, in: query, schema: { type: string } }
+        - { name: offerId, in: query, schema: { type: string } }
+        - { name: tradeId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: cursor, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/MerchantTradeListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─────────────────────────────────────────────────────────────────────
+  # SUB-USER PROFILE + TRADE URLS
+  # ─────────────────────────────────────────────────────────────────────
+  /user:
+    get:
+      operationId: getUserProfile
+      tags: [Profile]
+      summary: Get sub-user profile
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required.
+
+        Returns the sub-user's identity, Steam link (primary trade URL),
+        Discord link (if connected), wallet snapshot.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/UserProfile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /user/settings/tradeurls:
+    get:
+      operationId: listTradeUrls
+      tags: [Trade URLs]
+      summary: List the sub-user's Steam trade URLs
+      description: '**Auth context:** sub-user — `On-Behalf-Of` required.'
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/TradeUrlListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: addTradeUrl
+      tags: [Trade URLs]
+      summary: Add a Steam trade URL
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
+
+        Server resolves the SteamID and persona via Steam — request can fail with
+        `TRADEURL_INVALID_TOKEN` (1413) if the trade URL is invalid, expired, or the
+        Steam profile / inventory is private. `TRADEURL_ESCROW` (1414) if the account
+        has trade hold enabled.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddTradeUrlBody' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/TradeUrlResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /user/settings/tradeurls/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/OnBehalfOf' }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateTradeUrl
+      tags: [Trade URLs]
+      summary: Update a trade URL (rotate URL or set primary)
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
+
+        Provide at least one of `url` or `isPrimary`. Only one URL per sub-user
+        can be primary.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTradeUrlBody' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/TradeUrlResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    delete:
+      operationId: deleteTradeUrl
+      tags: [Trade URLs]
+      summary: Delete a trade URL
+      description: '**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**'
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ─────────────────────────────────────────────────────────────────────
+  # SUB-USER WALLET
+  # ─────────────────────────────────────────────────────────────────────
+  /user/wallet/balance:
+    get:
+      operationId: getUserBalance
+      tags: [Wallet]
+      summary: Sub-user spot balance
+      description: '**Auth context:** sub-user — `On-Behalf-Of` required.'
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/WalletBalance' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /user/wallet/ledger:
+    get:
+      operationId: listUserTransactions
+      tags: [Wallet]
+      summary: Sub-user transaction ledger (cursor-paginated)
+      description: '**Auth context:** sub-user — `On-Behalf-Of` required.'
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: type, in: query, schema: { type: string }, description: 'Optional ledger entry-type filter (e.g. `merchant_fund`, `trade_payment`).' }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/TransactionHistory' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ─────────────────────────────────────────────────────────────────────
+  # SUB-USER DEPOSITS — Gate Pay
+  # ─────────────────────────────────────────────────────────────────────
+  /user/wallet/deposit/gate/chains:
+    get:
+      operationId: getGateDepositChains
+      tags: [Deposits]
+      summary: Supported Gate Pay deposit currencies + chains
+      description: '**Auth context:** sub-user — `On-Behalf-Of` required.'
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/DepositChainsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /user/wallet/deposit/gate/quote:
+    post:
+      operationId: quoteGateDeposit
+      tags: [Deposits]
+      summary: Quote a Gate Pay deposit
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
+
+        Quote is short-lived (TTL embedded in `expiresIn`). Pass `quoteToken` to
+        the create endpoint to commit.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DepositQuoteBody' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/DepositQuoteResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /user/wallet/deposit/gate:
+    post:
+      operationId: createGateDeposit
+      tags: [Deposits]
+      summary: Create a Gate Pay deposit from a quote
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
+
+        Returns either a hosted `whitelabelUrl` (redirect the sub-user there) or
+        an on-chain pay-to address — usually both. Settlement happens via the
+        gateway webhook; subscribe to `deposit.transfer` / `deposit.completed`
+        WS events for the sub-user.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateDepositBody' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CreateDepositResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ─────────────────────────────────────────────────────────────────────
+  # SUB-USER DEPOSITS — On-ramp (card)
+  # ─────────────────────────────────────────────────────────────────────
+  /user/wallet/deposit/onramp/quote:
+    post:
+      operationId: quoteOnrampDeposit
+      tags: [Deposits]
+      summary: Quote a card on-ramp deposit
+      description: '**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**'
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OnrampQuoteBody' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/OnrampQuoteResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /user/wallet/deposit/onramp/session:
+    post:
+      operationId: createOnrampSession
+      tags: [Deposits]
+      summary: Create a hosted card-payment session
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
+
+        Returns a `whitelabelUrl` to redirect the sub-user to. After payment,
+        the on-ramp partner posts a callback and the sub-user's wallet is
+        credited; subscribe to `deposit.completed` WS events to react.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OnrampSessionBody' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/OnrampSessionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ─────────────────────────────────────────────────────────────────────
+  # SUB-USER DEPOSITS — Self-hosted EVM crypto
+  # ─────────────────────────────────────────────────────────────────────
+  /user/wallet/deposit/crypto/address:
+    get:
+      operationId: getCryptoDepositAddress
+      tags: [Deposits]
+      summary: Get the sub-user's deposit address
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required.
+
+        Same EVM address across all supported chains; idempotent (the address is
+        provisioned on first call and cached). Listed `tokens` are accepted at
+        launch — sending other ERC-20s will result in `deposit.failed` with
+        reason `unsupported_token`.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CryptoAddressResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /user/wallet/deposit/crypto/quote:
+    post:
+      operationId: quoteCryptoDeposit
+      tags: [Deposits]
+      summary: Preview crypto deposit value across chains
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
+
+        Returns per-chain receive amount and gas preview for the requested
+        token + amount. Used to show the sub-user the cheapest network.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CryptoQuoteBody' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CryptoQuoteResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ─────────────────────────────────────────────────────────────────────
+  # SUB-USER DEPOSITS — Universal cancel/resume
+  # ─────────────────────────────────────────────────────────────────────
+  /user/wallet/deposit/{id}/cancel:
+    post:
+      operationId: cancelDeposit
+      tags: [Deposits]
+      summary: Cancel a pending deposit
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required.
+
+        Works for `gatepay` and `onramp` deposits in non-final state (`initiated`,
+        `pending`, `partial`). No-op once the deposit is `completed`, `refunded`,
+        `cancelled`, `expired`, or `failed`.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CancelDepositResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /user/wallet/deposit/{id}/resume:
+    post:
+      operationId: resumeDeposit
+      tags: [Deposits]
+      summary: Resume an in-progress deposit
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required.
+
+        Returns the current `whitelabelUrl` / on-chain address for an existing
+        deposit so a user can finish paying after closing the original session.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ResumeDepositResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─────────────────────────────────────────────────────────────────────
+  # CATALOG
+  # ─────────────────────────────────────────────────────────────────────
+  /market/search/suggestions:
+    get:
+      operationId: getMarketSearchSuggestions
+      tags: [Market]
+      summary: Type-ahead suggestions for item search
+      description: '**Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 1000/min.**'
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 100 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SuggestionsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /market/search:
+    get:
+      operationId: searchMarket
+      tags: [Market]
+      summary: Search items in the catalog
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 1000/min.**
+
+        Page-paginated. Returns canonical items (not listings) — to see live
+        offers for an item, hit `/market/listings/:itemId`.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: weapon, in: query, schema: { type: string, maxLength: 50 } }
+        - { name: rarity, in: query, schema: { type: string, maxLength: 50 } }
+        - { name: wear, in: query, schema: { type: string, maxLength: 50 } }
+        - name: category
+          in: query
+          schema: { type: string, enum: [Normal, StatTrak, Souvenir] }
+        - { name: itemType, in: query, schema: { type: string, maxLength: 50 } }
+        - { name: tags, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: paintIndex, in: query, schema: { type: integer } }
+        - { name: collection, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: priceMin, in: query, schema: { type: number, minimum: 0 } }
+        - { name: priceMax, in: query, schema: { type: number, minimum: 0 } }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [relevance, nameAsc, nameDesc, priceAsc, priceDesc], default: relevance }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SearchResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /market/items/{itemId}:
+    get:
+      operationId: getMarketItem
+      tags: [Market]
+      summary: Get item detail
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 1000/min.**
+
+        Includes per-marketplace `offersOverview` (best price + count) for the
+        markets the item is currently listed on.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: itemId, in: path, required: true, schema: { type: string, minLength: 1 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ItemDetailResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ─────────────────────────────────────────────────────────────────────
+  # LISTINGS
+  # ─────────────────────────────────────────────────────────────────────
+  /market/items/{itemId}/listings:
+    get:
+      operationId: listItemListings
+      tags: [Market]
+      summary: List live marketplace offers for an item
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 200/min.**
+
+        Live cross-marketplace offers for an item, dispatched to marketplace
+        workers. `market` filters by marketplace index (0 = all). For Doppler
+        knives, optionally filter by `phase`. For float-relevant items, pass
+        `wearMin` + `wearMax` together (both required if either is sent).
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: itemId, in: path, required: true, schema: { type: string, minLength: 1 } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: market, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - name: phase
+          in: query
+          schema:
+            type: string
+            enum: [Phase 1, Phase 2, Phase 3, Phase 4, Ruby, Sapphire, Black Pearl, Emerald]
+        - { name: wearMin, in: query, schema: { type: number, minimum: 0, maximum: 1 } }
+        - { name: wearMax, in: query, schema: { type: number, minimum: 0, maximum: 1 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ListingsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /market/listings/{listingId}:
+    get:
+      operationId: getMarketListing
+      tags: [Market]
+      summary: Get a single listing by ID
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
+
+        Used to refresh the latest price/availability on a listing the sub-user
+        is about to buy.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: listingId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/MarketListing' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ─────────────────────────────────────────────────────────────────────
+  # TRADING
+  # ─────────────────────────────────────────────────────────────────────
+  /market/buy:
+    post:
+      operationId: buyMarketItems
+      tags: [Market]
+      summary: Buy specific listings (1–10 at a time)
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 100/min.**
+
+        Each `items[]` entry references a `listingId` and a `maxPrice` ceiling.
+        If the listing's price moved above `maxPrice` between catalog read and
+        purchase, that item fails.
+
+        Sub-user wallet is debited synchronously by `totalPrice` (escrowed); the
+        Trade then runs through marketplace workers. Subscribe to `trade.*` WS
+        events for status updates.
+
+        Common error keys: `INSUFFICIENT_BALANCE` (1500), `LISTING_NOT_FOUND` (2011),
+        `PRICE_MISMATCH` (2020), `TRADEURL_REQUIRED` (2022), `MARKET_UNAVAILABLE` (2000).
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BuyBody' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/BuyResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /market/buy/quick:
+    post:
+      operationId: quickBuyMarketItem
+      tags: [Market]
+      summary: Buy N units of an item — server picks the cheapest matching listings
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
+
+        Used for bulk fills. The server selects up to `amount` listings ≤
+        `maxPrice` for the given `itemId` and creates one Trade. `itemCount` in
+        the response is the actual purchased count (may be less than
+        `requestedCount` if supply ran out at the cap).
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuickBuyBody' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/QuickBuyResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /market/trades:
+    get:
+      operationId: listMarketTransactions
+      tags: [Market]
+      summary: List the sub-user's trades
+      description: '**Auth context:** sub-user — `On-Behalf-Of` required. Cursor-paginated.'
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: cursor, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/TradeStatus' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/TransactionListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /market/trades/{tradeId}:
+    get:
+      operationId: getMarketTransaction
+      tags: [Market]
+      summary: Get a single trade
+      description: '**Auth context:** sub-user — `On-Behalf-Of` required.'
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: tradeId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Trade' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /market/trades/{tradeId}/items/{itemId}/cancel:
+    post:
+      operationId: cancelMarketTransactionItem
+      tags: [Market]
+      summary: Cancel a single in-progress item on a Trade
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
+
+        Best-effort — marketplace must still accept the cancellation. The
+        response `status` field reflects whether the cancel succeeded.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: tradeId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: itemId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CancelItemResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ─────────────────────────────────────────────────────────────────────
+  # WEBSOCKET
+  # ─────────────────────────────────────────────────────────────────────
+  /auth/ws-token:
+    post:
+      operationId: createWsToken
+      tags: [WebSocket]
+      summary: Mint a short-lived WS token for a sub-user
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required.
+
+        Returns a 1-hour JWT scoped to `[deposit, trade]`. Pass it as the
+        `?token=` query string when opening `wss://api.skinshark.gg/ws`.
+
+        Tokens are bound to the sub-user resolved from `On-Behalf-Of` — the
+        WebSocket only receives events for that user. To watch multiple
+        sub-users, mint a token per sub-user and open one socket each.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/WsTokenResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /ws:
+    get:
+      operationId: wsConnect
+      tags: [WebSocket]
+      summary: WebSocket endpoint (HTTP upgrade)
+      description: |
+        **Auth context:** sub-user — token from `POST /auth/ws-token`.
+
+        Open with `wss://api.skinshark.gg/ws?token=<wsToken>`. The token is
+        verified at upgrade; on failure the server closes with code `4001
+        Invalid token`.
+
+        ### Protocol
+
+        - **Read-only.** Any client → server frame closes the socket with code
+          `4002 Read-only`.
+        - **Heartbeat.** The server sends WS pings; respond with pongs to keep
+          the connection alive (handled automatically by most clients).
+        - **First frame.** Immediately after upgrade, the server sends
+          `WsConnectedEvent` with the resolved `userId`.
+        - **Subsequent frames.** All push events conform to `WsEvent` — a
+          discriminated union keyed by the top-level `event` field.
+
+        ### Close codes
+
+        | Code | Reason          | Cause                                          |
+        |------|-----------------|------------------------------------------------|
+        | 4001 | Missing token   | No `?token=` query string                      |
+        | 4001 | Invalid token   | Bad signature, expired, or wrong purpose       |
+        | 4002 | Read-only       | Client sent any frame after upgrade            |
+
+        ### Events
+
+        Each frame has the shape `{ event, data, ts }` where `ts` is Unix epoch
+        ms. See the `WsEvent` schema below for the full union — the deposit
+        events differ between gateway-hosted (gatepay/onramp) and self-hosted
+        crypto deposits even though they share `event` names.
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        '101':
+          description: Switching Protocols — WebSocket handshake completed.
+        '200':
+          description: |
+            Reference response for documentation tooling. The actual successful
+            response is `101 Switching Protocols`; once upgraded, the server
+            pushes JSON frames matching `WsEvent`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WsEvent' }
+        '400':
+          description: Upgrade required / missing token (HTTP path).
+
+  # Discriminated event union (referenced from /ws description above)
+  /ws/events:
+    get:
+      operationId: wsEventsReference
+      tags: [WebSocket]
+      summary: '(Reference only) WebSocket event schemas'
+      description: |
+        This is a documentation-only path — there is no HTTP endpoint at
+        `/ws/events`. Use it to navigate the message schemas pushed over
+        `/ws`.
+
+        Discriminate on `event`:
+
+        - `connected` → WsConnectedEvent
+        - `deposit.transfer` → WsDepositTransferEvent (gatepay on-chain detected)
+        - `deposit.completed` → WsGatewayDepositCompletedEvent **or** WsCryptoDepositCreditedEvent (distinguish by `data.fundingId` vs `data.depositId`)
+        - `deposit.failed` → WsDepositFailedEvent **or** WsCryptoDepositFailedEvent (distinguish by `data.fundingId` vs `data.depositId`)
+        - `deposit.refunded` → WsDepositRefundedEvent
+        - `deposit.pending` → WsCryptoDepositPendingEvent
+        - `trade.<status>` → WsTradeUpdateEvent
+        - `system.notice` → WsSystemNoticeEvent
+      responses:
+        '200':
+          description: '(reference only)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WsEvent' }
+        '4XX':
+          description: '(reference only — this path has no HTTP endpoint)'

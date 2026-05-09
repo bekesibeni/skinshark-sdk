@@ -1,0 +1,63 @@
+{
+  "name": "@skinshark/sdk",
+  "version": "0.1.2",
+  "description": "Official TypeScript SDK for the SkinShark Merchant API",
+  "author": "SkinShark Engineering <support@skinshark.gg>",
+  "license": "Proprietary",
+  "homepage": "https://github.com/bekesibeni/skinshark-sdk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bekesibeni/skinshark-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bekesibeni/skinshark-sdk/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "got": "^15.0.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2",
+    "nock": "^14.0.15",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  },
+  "keywords": [
+    "skinshark",
+    "merchant",
+    "api",
+    "sdk",
+    "marketplace"
+  ]
+}
