@@ -18,7 +18,7 @@ export type Role = 'user' | 'merchant' | 'admin';
 export type TwoFactorMethod = 'email' | 'totp';
 export type WalletType = 'spot' | 'earnings';
 export type WalletStatus = 'active' | 'suspended' | 'closed';
-export type TradeStatus = 'INITIATED' | 'PENDING' | 'ACTIVE' | 'HOLD' | 'COMPLETED' | 'FAILED' | 'REVERTED';
+export type TradeStatus = 'initiated' | 'pending' | 'active' | 'hold' | 'completed' | 'failed' | 'reverted';
 export type DepositStatus = 'initiated' | 'pending' | 'completed' | 'partial' | 'expired' | 'cancelled' | 'refunded' | 'failed';
 export type DepositMethod = 'gatepay' | 'onramp' | 'crypto';
 export type DepositCurrency = 'USDT' | 'USDC' | 'DAI' | 'BTC' | 'ETH' | 'SOL';
@@ -28,7 +28,7 @@ export type CryptoNativeToken = 'USDT' | 'USDC' | 'NATIVE';
 export type DopplerPhase = 'Phase 1' | 'Phase 2' | 'Phase 3' | 'Phase 4' | 'Ruby' | 'Sapphire' | 'Black Pearl' | 'Emerald';
 export type ItemCategory = 'Normal' | 'StatTrak' | 'Souvenir';
 export type SearchSort = 'relevance' | 'nameAsc' | 'nameDesc' | 'priceAsc' | 'priceDesc';
-export type DeliveryMode = 'STANDARD' | 'INSTANT';
+export type DeliveryMode = 'standard' | 'instant';
 
 // ── Merchant profile / fees / stats ──────────────────────────────────
 export interface MerchantProfile {
@@ -533,7 +533,7 @@ export interface Trade {
   currency: Currency;
   holdEndDate?: string;
   settledAt?: string;
-  revertedBy?: 'SUPPLIER' | 'USER';
+  revertedBy?: 'supplier' | 'user';
   error?: string;
   createdAt: string;
   updatedAt: string;

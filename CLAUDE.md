@@ -123,7 +123,7 @@ ESM-only. `tsconfig.json` sets `"ignoreDeprecations": "6.0"` because tsup's inte
 - **Comments**: short single-line "why" comments only, on non-obvious decisions (cache TTL choices, retry-floor of 1ms, etc). No multi-line module headers, no "this function does X" comments.
 - **Money is pass-through**: numbers for decimal currency fields (`5.23`), strings for `*Cents` fields (`"15000"`). Never auto-parse. Same for ISO date strings — never auto-parse to `Date`.
 - **No runtime validation** of responses. Types only. The SDK trusts the API.
-- **Trade-related enums on the wire are UPPERCASE** (`TradeStatus`, `TradeType`, `ItemPurchaseStatus`, `RevertedBy`, `DeliveryMode`). Everything else stays lowercase (`UserStatus`, `WalletStatus`, `DepositStatus`, `WalletType`, `DepositMethod`, `TwoFactorMethod`). Currency/token symbols (USD, EUR, USDT, USDC) are uppercase per their domain convention. CS2 community labels (StatTrak, Phase 1) keep their natural casing.
+- **All status/type enums on the wire are lowercase** (`TradeStatus`, `TradeType`, `RevertedBy`, `DeliveryMode`, `UserStatus`, `WalletStatus`, `DepositStatus`, `WalletType`, `DepositMethod`, `TwoFactorMethod`). Currency/token symbols (USD, EUR, USDT, USDC) are uppercase per their domain convention. CS2 community labels (StatTrak, Phase 1) keep their natural casing.
 - **No proxy support, no browser support, no edge-runtime support** as stated targets — Node 22+ first, Bun via Node compat. Don't add polyfills.
 - **Tests**: nock for HTTP mocking. Unit tests in `test/unit/`, integration in `test/integration/`. The integration suite runs against staging when env vars are set.
 

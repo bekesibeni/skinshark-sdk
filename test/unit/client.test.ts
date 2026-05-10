@@ -207,13 +207,13 @@ describe('sdk.as(id)', () => {
       )
       .reply(201, {
         requestId: 'req-buy', success: true,
-        data: { id: 'T1', status: 'PENDING', itemCount: 1, totalPrice: 5, createdAt: '2026-01-01T00:00:00Z' },
+        data: { id: 'T1', status: 'pending', itemCount: 1, totalPrice: 5, createdAt: '2026-01-01T00:00:00Z' },
       });
 
     const sdk = new Skinshark({ apiKey: API_KEY });
     const u = await sdk.as('ext-42');
     const trade = await u.market.buy([{ listingId: 'L1', maxPrice: '5.00' }], 'order-1');
     expect(trade.id).toBe('T1');
-    expect(trade.status).toBe('PENDING');
+    expect(trade.status).toBe('pending');
   });
 });

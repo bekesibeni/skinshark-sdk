@@ -126,7 +126,7 @@ const trade = await sdk.market.buy(
 
 // Quick-buy: server picks N cheapest matching listings
 const filled = await sdk.market.quickBuy(
-  { itemId: 'item-id', maxPrice: '5.00', amount: 20, delivery: 'INSTANT' },
+  { itemId: 'item-id', maxPrice: '5.00', amount: 20, delivery: 'instant' },
   'order-7422',
   { onBehalfOf: 'user-42' },
 );
@@ -229,17 +229,16 @@ app.post('/webhooks/skinshark',
 
 ## Enum casing
 
-Trade-related enums on the wire are **UPPERCASE**:
+All status/type enums on the wire are **lowercase**:
 
 ```
-TradeStatus         INITIATED / PENDING / ACTIVE / HOLD / COMPLETED / FAILED / REVERTED
-TradeType           BUY / SELL
-ItemPurchaseStatus  INITIATED / ... / REVERTED
-RevertedBy          SUPPLIER / USER
-DeliveryMode        STANDARD / INSTANT
+TradeStatus    initiated / pending / active / hold / completed / failed / reverted
+TradeType      buy / sell
+RevertedBy     supplier / user
+DeliveryMode   standard / instant
 ```
 
-Everything else stays **lowercase**:
+Other lowercase enums:
 
 ```
 UserStatus      active / suspended / deleted

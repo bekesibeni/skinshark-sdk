@@ -227,7 +227,7 @@ components:
     WalletStatus: { type: string, enum: [active, suspended, closed] }
     TradeStatus:
       type: string
-      enum: [INITIATED, PENDING, ACTIVE, HOLD, COMPLETED, FAILED, REVERTED]
+      enum: [initiated, pending, active, hold, completed, failed, reverted]
     DepositStatus:
       type: string
       enum: [initiated, pending, completed, partial, expired, cancelled, refunded, failed]
@@ -1038,7 +1038,7 @@ components:
           description: Requested unit count. The server picks the cheapest matching listings.
         delivery:
           type: string
-          enum: [STANDARD, INSTANT]
+          enum: [standard, instant]
         tradeUrl: { type: string, format: uri }
         externalId: { type: string, maxLength: 128 }
 
@@ -1101,7 +1101,7 @@ components:
         [id, type, userId, steamId, tradeUrl, status, game, items, summary, totalPrice, currency, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
-        type: { type: string, example: BUY }
+        type: { type: string, enum: [buy, sell] }
         userId: { type: string }
         steamId: { type: string }
         tradeUrl: { type: string }
@@ -1123,7 +1123,7 @@ components:
         currency: { $ref: '#/components/schemas/Currency' }
         holdEndDate: { type: string, format: date-time }
         settledAt: { type: string, format: date-time }
-        revertedBy: { type: string, enum: [SUPPLIER, USER] }
+        revertedBy: { type: string, enum: [supplier, user] }
         error: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
