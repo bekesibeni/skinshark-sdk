@@ -1,3 +1,4 @@
+import { SkinsharkError } from './errors.js';
 import { HttpClient, type SkinsharkClientOptions, type RequestOptions } from './internal/http.js';
 import { newIdempotencyKey as generateKey } from './internal/idempotency.js';
 import { AccountModule } from './modules/account.js';
@@ -10,6 +11,12 @@ import { DepositsModule } from './modules/deposits.js';
 import { MarketModule } from './modules/market.js';
 import { buildScoped, type ScopedClient } from './modules/scoped.js';
 import type { Envelope } from './types/api.js';
+import type { WebhookEvent } from './types/webhooks.js';
+import {
+  verifyWebhook as verifyWebhookFn,
+  type HeaderInput,
+  type VerifyWebhookOptions,
+} from './webhooks.js';
 
 export class Skinshark {
   // Merchant-only
@@ -25,9 +32,11 @@ export class Skinshark {
   readonly market: MarketModule;
 
   private readonly http: HttpClient;
+  private readonly webhookSecret: string | undefined;
 
   constructor(opts: SkinsharkClientOptions) {
     this.http = new HttpClient(opts);
+    this.webhookSecret = opts.webhookSecret;
     this.account = new AccountModule(this.http);
     this.users = new UsersModule(this.http);
     this.trades = new TradesModule(this.http);
@@ -60,6 +69,30 @@ export class Skinshark {
   /** Generate a fresh UUIDv4 (e.g. for pre-allocated Idempotency-Keys). */
   newIdempotencyKey(): string {
     return generateKey();
+  }
+
+  /**
+   * Verify a SkinShark webhook delivery using the secret from the constructor.
+   * Pass `opts.secret` to override per call (e.g. during key rotation).
+   * Throws SkinsharkError on missing/expired/invalid signatures.
+   */
+  verifyWebhook(
+    rawBody: string | Buffer,
+    headers: HeaderInput,
+    opts?: Partial<VerifyWebhookOptions>,
+  ): WebhookEvent {
+    const secret = opts?.secret ?? this.webhookSecret;
+    if (!secret) {
+      throw new SkinsharkError({
+        code: 0,
+        key: 'INVALID_SIGNATURE',
+        message:
+          'Webhook secret not configured. Pass `webhookSecret` to the Skinshark constructor or `secret` per call.',
+      });
+    }
+    const merged: VerifyWebhookOptions = { secret };
+    if (opts?.toleranceSeconds !== undefined) merged.toleranceSeconds = opts.toleranceSeconds;
+    return verifyWebhookFn(rawBody, headers, merged);
   }
 
   /**

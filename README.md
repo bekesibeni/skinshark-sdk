@@ -13,7 +13,10 @@ npm install @skinshark/sdk
 ```ts
 import { Skinshark } from '@skinshark/sdk';
 
-const sdk = new Skinshark({ apiKey: process.env.SKINSHARK_API_KEY! });
+const sdk = new Skinshark({
+  apiKey: process.env.SKINSHARK_API_KEY!,
+  webhookSecret: process.env.SKINSHARK_WH_SECRET!,  // optional, enables sdk.verifyWebhook(...)
+});
 
 // Merchant context — runs as your account
 const profile = await sdk.account.get();
@@ -104,9 +107,10 @@ sdk
 ├── as(ref) → ScopedClient                                      sub-user-bound view
 ├── health()                                                    auth/connectivity check
 ├── newIdempotencyKey()                                         UUIDv4 generator
+├── verifyWebhook(rawBody, headers, opts?)                      uses ctor webhookSecret
 └── request<T>({ method, path, query, body, opts })             escape hatch
 
-verifyWebhook(rawBody, headers, { secret, toleranceSeconds? })
+verifyWebhook(rawBody, headers, { secret, toleranceSeconds? })  standalone (no client)
 isError(e, key) / isAuthError / isRateLimited / isValidationError
 meta(response) → { requestId, status, headers, rateLimit }
 ```
@@ -192,12 +196,17 @@ await u.deposits.resume(dep.fundingId);
 
 ## Webhooks
 
-Configure your webhook URL + secret in the merchant dashboard. Then verify
-inbound requests:
+Configure your webhook URL + secret in the merchant dashboard. Pass the secret
+to the constructor, then verify inbound requests via `sdk.verifyWebhook(...)`:
 
 ```ts
-import { verifyWebhook, isError } from '@skinshark/sdk';
+import { Skinshark, isError } from '@skinshark/sdk';
 import express from 'express';
+
+const sdk = new Skinshark({
+  apiKey: process.env.SKINSHARK_API_KEY!,
+  webhookSecret: process.env.SKINSHARK_WH_SECRET!,
+});
 
 const app = express();
 
@@ -207,9 +216,7 @@ app.post('/webhooks/skinshark',
   express.raw({ type: 'application/json' }),
   (req, res) => {
     try {
-      const event = verifyWebhook(req.body, req.headers, {
-        secret: process.env.SKINSHARK_WH_SECRET!,
-      });
+      const event = sdk.verifyWebhook(req.body, req.headers);
 
       switch (event.type) {
         case 'trade.completed':  /* event.data.trade */ break;
@@ -225,6 +232,27 @@ app.post('/webhooks/skinshark',
     }
   },
 );
+```
+
+Per-call override (e.g. during secret rotation, or when one client serves
+multiple webhook endpoints with different secrets):
+
+```ts
+sdk.verifyWebhook(req.body, req.headers, {
+  secret: process.env.SKINSHARK_WH_SECRET_NEW!,
+  toleranceSeconds: 60,  // tighter replay window than the 300s default
+});
+```
+
+Or use the standalone `verifyWebhook` if you don't want to instantiate a client
+(serverless cold-start handlers, edge functions):
+
+```ts
+import { verifyWebhook } from '@skinshark/sdk';
+
+const event = verifyWebhook(req.body, req.headers, {
+  secret: process.env.SKINSHARK_WH_SECRET!,
+});
 ```
 
 ## Enum casing
@@ -306,6 +334,7 @@ m?.rateLimit   // { limit, remaining, resetAt } if the response carried it
 ```ts
 new Skinshark({
   apiKey: '...',                  // required
+  webhookSecret: '...',           // optional — enables sdk.verifyWebhook() without per-call secret
   baseUrl: 'https://api.skinshark.gg',  // default
   timeoutMs: 30_000,              // per-request, default 30s
   retries: { max: 3, baseDelayMs: 200 },   // 429 + 5xx with Retry-After honored

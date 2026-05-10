@@ -100,6 +100,8 @@ The scope is bound to the canonical UUID (not the original ref), so the scoped c
 
 `verifyWebhook(rawBody, headers, { secret, toleranceSeconds? })` is **standalone** — it doesn't depend on the HTTP client and doesn't share state. The signing scheme matches Standard Webhooks: HMAC-SHA256 over `${id}.${timestamp}.${body}`, signature header `t=<ts>,s=<sig>[,s1=<old>]`. `s1=` is the rotation slot.
 
+`Skinshark.verifyWebhook(rawBody, headers, opts?)` is a thin instance method that calls the standalone function with `opts.secret ?? this.webhookSecret` (set via the constructor's `webhookSecret` option). Pass it once at client construction and callers don't need to thread the secret through. Per-call `opts.secret` overrides for rotation. Throws `INVALID_SIGNATURE` if neither is set.
+
 Always pass the **raw** body bytes — JSON middleware that re-stringifies will break the signature. Use timing-safe comparison (`timingSafeEqual` on equal-length buffers).
 
 ### Branded IDs (`src/types/branded.ts`)

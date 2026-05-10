@@ -13,6 +13,7 @@ import type { ErrorKey } from '../types/errors.js';
 
 export interface SkinsharkClientOptions {
   apiKey: string;
+  webhookSecret?: string;
   baseUrl?: string;
   userAgent?: string;
   timeoutMs?: number;
@@ -53,7 +54,9 @@ export interface InternalRequestInit {
 }
 
 const REDACTED = '<redacted>';
-const SDK_VERSION = '0.1.0';
+// Replaced at build time by tsup/vitest `define`. Stays in sync with package.json automatically.
+declare const __SDK_VERSION__: string;
+const SDK_VERSION = __SDK_VERSION__;
 
 // Idempotent by HTTP semantics — safe to retry without an idempotency key.
 const IDEMPOTENT_METHODS: Method[] = ['GET', 'PUT', 'DELETE', 'HEAD', 'OPTIONS'];
@@ -86,8 +89,9 @@ function pickRateLimit(headers: Record<string, string | string[] | undefined>): 
   if (typeof limit === 'string') out.limit = Number(limit);
   if (typeof remaining === 'string') out.remaining = Number(remaining);
   if (typeof reset === 'string') {
+    // @fastify/rate-limit emits seconds-until-reset (relative), not Unix epoch.
     const s = Number(reset);
-    if (Number.isFinite(s)) out.resetAt = new Date(s * 1000);
+    if (Number.isFinite(s)) out.resetAt = new Date(Date.now() + s * 1000);
   }
   return out;
 }

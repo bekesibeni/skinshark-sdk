@@ -12,7 +12,7 @@ export interface VerifyWebhookOptions {
   toleranceSeconds?: number;
 }
 
-type HeaderInput = Headers | Record<string, string | string[] | undefined>;
+export type HeaderInput = Headers | Record<string, string | string[] | undefined>;
 
 function readHeader(headers: HeaderInput, name: string): string | undefined {
   const lc = name.toLowerCase();

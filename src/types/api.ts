@@ -497,7 +497,8 @@ export interface QuickBuyResponse {
 }
 
 export interface TradeItem {
-  id: string;
+  /** Listing id — the same id returned by listing endpoints. Use this id when calling the cancel endpoint. */
+  id: ListingId;
   name: string | null;
   marketHashName: string | null;
   type: string | null;
@@ -550,8 +551,7 @@ export interface MerchantTradeListResponse {
 }
 
 export interface CancelItemResponse {
-  ok: true;
-  itemId: string;
+  itemId: ListingId;
   status: 'cancelled' | 'failed';
 }
 
