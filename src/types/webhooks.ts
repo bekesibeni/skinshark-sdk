@@ -1,7 +1,8 @@
-import type { Currency, TradeStatus } from './api.js';
+import type { Trade } from './api.js';
 
 export type TradeEventType =
   | 'trade.initiated'
+  | 'trade.pending'
   | 'trade.active'
   | 'trade.hold'
   | 'trade.completed'
@@ -21,42 +22,6 @@ export type DepositEventType =
   | 'deposit.cancelled';
 
 export type WebhookEventType = TradeEventType | DepositEventType;
-
-export interface SerializedWebhookTrade {
-  id: string;
-  type: string;
-  status: TradeStatus | string;
-  userId: string;
-  externalId: string | null;
-  steamId: string;
-  tradeId: string | null;
-  offerId: string | null;
-  game: string;
-  currency: Currency;
-  fxRateLockedBp: number | null;
-  totalPriceCents: number;
-  totalUsdCents: number;
-  pendingCreditCents: number | null;
-  houseFeeCents: number | null;
-  merchantFeeCents: number | null;
-  merchantId: string | null;
-  holdEndDate: string | null;
-  revertedBy: string | null;
-  settledAt: string | null;
-  error: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface SerializedWebhookItem {
-  id: string;
-  rawId: string | null;
-  name: string | null;
-  marketHashName: string | null;
-  appid: number;
-  purchaseStatus: string | null;
-  purchaseError: string | null;
-}
 
 export interface SerializedWebhookDeposit {
   id: string;
@@ -80,8 +45,7 @@ export interface SerializedWebhookDeposit {
 }
 
 export interface TradeEventData {
-  trade: SerializedWebhookTrade;
-  item?: SerializedWebhookItem;
+  trade: Trade;
   settlement?: { houseFeeCents: number; merchantFeeCents: number };
 }
 
