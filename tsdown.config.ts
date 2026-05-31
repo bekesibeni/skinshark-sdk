@@ -13,9 +13,6 @@ export default defineConfig({
   format: ['esm'],
   platform: 'node',
   target: 'node22',
-  // tsdown defaults fixedExtension to true on the node platform, which would emit
-  // .mjs/.d.mts. Keep .js/.d.ts so the package.json exports map stays valid.
-  fixedExtension: false,
   dts: true,
   sourcemap: true,
   clean: true,
