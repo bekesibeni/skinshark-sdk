@@ -84,7 +84,7 @@ await u.refresh();   // re-fetch and update fields
 
 ## API surface
 
-```
+```bash
 sdk
 ├── account.{get,fees,stats,wallet,ledger}                      merchant-only
 ├── users.{list,create,get,delete,suspend,reactivate,
@@ -306,7 +306,7 @@ const event = verifyWebhook(req.body, req.headers, {
 
 All status/type enums on the wire are **lowercase**:
 
-```
+```bash
 TradeStatus    initiated / pending / active / hold / completed / failed / reverted
 TradeType      buy / sell
 RevertedBy     supplier / user
@@ -315,7 +315,7 @@ DeliveryMode   standard / instant
 
 Other lowercase enums:
 
-```
+```bash
 UserStatus      active / suspended / deleted
 WalletStatus    active / suspended / closed
 DepositStatus   initiated / pending / completed / partial / expired / cancelled / refunded / failed
