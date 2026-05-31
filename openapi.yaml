@@ -985,6 +985,31 @@ components:
         limit: { type: integer }
         totalPages: { type: integer }
 
+    MarketPrice:
+      type: object
+      required: [itemId, marketHashName, instant, standard]
+      properties:
+        itemId: { type: string }
+        marketHashName: { type: string }
+        instant:
+          type: [number, "null"]
+          description: C5 auto-deliver floor, after fee. Null when no instant listing.
+        standard:
+          type: [number, "null"]
+          description: Blended C5 + Eco floor (same value search returns), after fee.
+
+    MarketPricesResponse:
+      type: object
+      required: [items, total, page, limit, totalPages]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/MarketPrice' }
+        total: { type: integer }
+        page: { type: integer }
+        limit: { type: integer }
+        totalPages: { type: integer }
+
     ItemDetail:
       type: object
       required: [id, name, marketHashName, itemType, iconUrl, description, price, listingsCount, steamPrice]
@@ -2731,6 +2756,41 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: '#/components/schemas/SearchResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /market/prices:
+    get:
+      operationId: listMarketPrices
+      tags: [Market]
+      summary: Bulk per-item price feed
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 1000/min.**
+
+        Page-paginated catalog feed of per-item floors: `instant` (C5 auto-deliver)
+        and `standard` (blended C5 + Eco min, the same value `/market/search` returns).
+        Both are after the caller's fee. Either may be `null` when the item has no
+        matching live listing. Pass `limit=-1` to return the whole catalog in one
+        response (no pagination).
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - name: limit
+          in: query
+          description: 1–500 per page, or -1 for the entire catalog in one response.
+          schema: { type: integer, default: 100 }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/MarketPricesResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/RateLimited' }

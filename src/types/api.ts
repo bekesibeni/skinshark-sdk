@@ -502,6 +502,21 @@ export interface SearchResponse {
   totalPages: number;
 }
 
+export interface MarketPrice {
+  itemId: ItemId;
+  marketHashName: string;
+  instant: number | null; // C5 auto-deliver floor, after fee
+  standard: number | null; // blended C5 + Eco floor (matches search price), after fee
+}
+
+export interface MarketPricesResponse {
+  items: MarketPrice[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 export interface ItemDetail {
   id: ItemId;
   name: string;
@@ -731,6 +746,12 @@ export interface SearchQuery {
   priceMax?: number;
   sort?: SearchSort;
   page?: number;
+  limit?: number;
+}
+
+export interface MarketPricesQuery {
+  page?: number;
+  /** 1–500 per page, or -1 to return the whole catalog in one response. */
   limit?: number;
 }
 

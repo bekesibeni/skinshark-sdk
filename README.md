@@ -101,7 +101,7 @@ sdk
 │   ├── crypto.{address,quote}
 │   └── cancel(id) / resume(id)                                 actor-context
 ├── market
-│   ├── suggest, search, item                                   (catalog)
+│   ├── suggest, search, item, prices                           (catalog)
 │   ├── listings, listing
 │   ├── buy(items, externalId?, opts?)
 │   ├── quickBuy(body, externalId?, opts?)
@@ -136,6 +136,20 @@ const filled = await sdk.market.quickBuy(
   'order-7422',
   { onBehalfOf: 'user-42' },
 );
+```
+
+## Price feed
+
+```ts
+// Per-item floors after fee: `instant` (C5 auto-deliver) and `standard`
+// (blended C5 + Eco min). Either may be null when there's no live listing.
+const page = await sdk.market.prices({ page: 1, limit: 100 });
+for (const p of page.items) {
+  console.log(p.itemId, p.marketHashName, p.instant, p.standard);
+}
+
+// Whole catalog in one response (large payload):
+const all = await sdk.market.prices({ limit: -1 });
 ```
 
 ## Creating sub-users
