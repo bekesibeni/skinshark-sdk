@@ -5,14 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run dev              # tsup --watch
-npm run build            # tsup: ESM + .d.ts to dist/
-npm run typecheck        # tsc --noEmit
-npm test                 # vitest run (unit, mocked with nock)
-npm run test:watch       # vitest (watch mode)
-npm run test:integration # vitest with integration config (live API, env-gated)
-npx vitest run test/unit/users.test.ts            # single file
-npx vitest run test/unit/client.test.ts -t "isError"  # by test name
+pnpm dev                 # tsdown --watch
+pnpm build               # tsdown: ESM + .d.ts to dist/
+pnpm typecheck           # tsc --noEmit
+pnpm test                # vitest run (unit, mocked with nock)
+pnpm test:watch          # vitest (watch mode)
+pnpm test:integration    # vitest with integration config (live API, env-gated)
+pnpm exec vitest run test/unit/users.test.ts            # single file
+pnpm exec vitest run test/unit/client.test.ts -t "isError"  # by test name
 ```
 
 Integration tests skip unless `SKINSHARK_TEST_API_KEY` is set. The full mutating flow (`test/integration/full-flow.test.ts`) additionally requires `SKINSHARK_RUN_FULL_FLOW=1` so it doesn't fire by accident — it creates and deletes a real sub-user.
@@ -20,15 +20,15 @@ Integration tests skip unless `SKINSHARK_TEST_API_KEY` is set. The full mutating
 ```bash
 SKINSHARK_TEST_API_KEY=sk_... \
 SKINSHARK_TEST_BASE_URL=https://api-staging.skinshark.gg \
-npm run test:integration
+pnpm test:integration
 
 # Mutating flow (creates + deletes a sub-user):
-SKINSHARK_RUN_FULL_FLOW=1 SKINSHARK_TEST_API_KEY=... npm run test:integration
+SKINSHARK_RUN_FULL_FLOW=1 SKINSHARK_TEST_API_KEY=... pnpm test:integration
 ```
 
 ## Architecture
 
-**Stack:** got 15 (HTTP), TypeScript 6 ESNext, ESM-only, Node 22+. tsup for build, vitest + nock for tests. Zero runtime deps besides got.
+**Stack:** got 15 (HTTP), TypeScript 6 ESNext, ESM-only, Node 22+. tsdown (Rolldown) for build, vitest + nock for tests, pnpm for package management. Zero runtime deps besides got.
 
 **Source of truth:** `openapi.yaml` at the repo root mirrors the SkinShark Merchant API exactly. Wire types in `src/types/api.ts` are hand-derived from it. When the spec changes, update the types and the matching module method together.
 
@@ -108,14 +108,14 @@ Always pass the **raw** body bytes — JSON middleware that re-stringifies will 
 
 `ListingId`, `TradeId`, `ItemId`, `FundingId`, `DepositId`, `TradeUrlId`, `WalletId`, `TransactionId`, `SubUserUuid`, `MerchantId` are all `string & { __brand }` types. Returned values from the API are typed as branded; method inputs accept `string | BrandedId`. Don't try to brand `SubUserRef` or `TradeRef` — those accept either UUID or merchant-supplied externalId at the API level, so they stay plain `string`.
 
-### Build + exports (`tsup.config.ts`, `package.json`)
+### Build + exports (`tsdown.config.ts`, `package.json`)
 
 Two entry points:
 
 - `.` (`src/index.ts`) — runtime exports + types
 - `./types` (`src/types/index.ts`) — type-only subpath for consumers who want the wire types without the runtime client
 
-ESM-only. `tsconfig.json` sets `"ignoreDeprecations": "6.0"` because tsup's internal `baseUrl` triggers a TS6 warning that we don't control.
+ESM-only. `tsconfig.json` sets `"ignoreDeprecations": "6.0"` because the build's internal `baseUrl` handling triggers a TS6 warning that we don't control.
 
 ## Conventions
 

@@ -54,7 +54,7 @@ export interface InternalRequestInit {
 }
 
 const REDACTED = '<redacted>';
-// Replaced at build time by tsup/vitest `define`. Stays in sync with package.json automatically.
+// Replaced at build time by tsdown/vitest `define`. Stays in sync with package.json automatically.
 declare const __SDK_VERSION__: string;
 const SDK_VERSION = __SDK_VERSION__;
 

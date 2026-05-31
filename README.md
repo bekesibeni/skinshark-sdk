@@ -90,6 +90,8 @@ sdk
 ├── users.{list,create,get,delete,suspend,reactivate,
 │         fund,wallet,ledger,trades}                            merchant-only
 ├── trades.{list,get}                                           merchant-only (aggregate)
+├── payouts.{address,balances,quote,withdraw,
+│           getWithdrawal,listWithdrawals}                      merchant-only (crypto)
 ├── profile.get                                                 actor-context
 ├── tradeUrls.{list,add,update,delete}                          actor-context
 ├── wallet.{balance,transactions}                               actor-context
@@ -194,6 +196,51 @@ await u.deposits.cancel(dep.fundingId);
 await u.deposits.resume(dep.fundingId);
 ```
 
+## Payouts
+
+Crypto payouts always draw from the **merchant's** custody balance, so `payouts`
+is a merchant-only module (`sdk.payouts` — it's not on the scoped client). To
+attribute a payout to a sub-user, pass the `forSubUser` body field; do **not**
+use `onBehalfOf`. Every `*Cents` field is a USD-cent string (`"5000"` = $50.00).
+
+```ts
+// Fund custody — one shared EVM forwarder address across all supported chains
+const { address, chains, tokens } = await sdk.payouts.address();
+
+// Per-(chain, token) custody balances, in USD cents
+const { balances } = await sdk.payouts.balances();
+
+// Advisory live network-fee quote + 24h gas stats (not a commitment)
+const q = await sdk.payouts.quote({
+  chain: 'base', token: 'USDC', amountCents: '5000',
+});
+q.liveFeeUsdCents;       // current fee estimate
+q.liveTotalDebitCents;   // amount + fee that would be debited
+q.stats24h;              // { min, p25, avg, p75, max } fee over the last 24h
+
+// Request a payout — externalId is the idempotency key
+const w = await sdk.payouts.withdraw({
+  chain: 'base',
+  token: 'USDC',
+  destination: '0xRecipient...',
+  amountCents: '5000',
+  externalId: 'payout-7421',   // replaying the same value returns the original
+  forSubUser: 'user-42',       // optional attribution (UUID or your externalId)
+  maxFeeUsdCents: '50',        // optional — reject (don't fail open) if the live fee exceeds this
+});
+w.id;        // WithdrawalId
+w.status;    // 'pending_callback' | 'queued' | 'broadcast' | 'confirmed' | 'refunded'
+
+// Fetch one, or list (cursor-paginated)
+const detail = await sdk.payouts.getWithdrawal(w.id);
+const page = await sdk.payouts.listWithdrawals({ status: 'confirmed', limit: 50 });
+page.items;        // PayoutWithdrawalDetail[]
+page.nextCursor;   // pass back as { cursor } for the next page, or null when done
+```
+
+Supported chains are `ethereum`, `base`, `arbitrum`, `optimism`, `bsc`; tokens
+are `USDT` and `USDC`.
+
 ## Webhooks
 
 Configure your webhook URL + secret in the merchant dashboard. Pass the secret
@@ -275,6 +322,9 @@ DepositStatus   initiated / pending / completed / partial / expired / cancelled 
 WalletType      spot / earnings
 DepositMethod   gatepay / onramp / crypto
 TwoFactorMethod email / totp
+
+PayoutWithdrawalStatus  pending_callback / queued / broadcast / confirmed / refunded
+CryptoEvmChain          ethereum / base / arbitrum / optimism / bsc
 ```
 
 (Currency / token symbols like `USD`, `EUR`, `USDT`, `USDC` are uppercase per
