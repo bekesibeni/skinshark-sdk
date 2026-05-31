@@ -148,6 +148,8 @@ tags:
     description: Actor's spot balance and ledger. Merchant or sub-user context.
   - name: Deposits
     description: Fund the actor's wallet via Gate Pay, on-ramp (card), or self-hosted EVM crypto. Merchant or sub-user context.
+  - name: Payouts
+    description: Partner crypto-payout custody — fund, quote, and withdraw to external addresses with an approval callback. Merchant context only.
   - name: Market
     description: Catalog search, listings, buy / quick-buy, and the actor's own trades. Merchant or sub-user context.
   - name: WebSocket
@@ -705,6 +707,152 @@ components:
             network: { type: string }
             token: { type: string }
             address: { type: string }
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Partner crypto payout custody
+    # ─────────────────────────────────────────────────────────────────────
+    PayoutToken:
+      type: string
+      enum: [USDT, USDC]
+
+    PayoutWithdrawalStatus:
+      type: string
+      enum: [pending_callback, queued, broadcast, confirmed, refunded]
+      description: |
+        `pending_callback` → `queued` → `broadcast` → `confirmed`. Any rejection,
+        callback failure, or on-chain revert resolves to the single terminal
+        `refunded` (custody balance restored).
+
+    PayoutAddressResponse:
+      type: object
+      required: [address, chains, tokens]
+      properties:
+        address: { type: string, pattern: '^0x[a-fA-F0-9]{40}$' }
+        chains:
+          type: array
+          items: { $ref: '#/components/schemas/CryptoEvmChain' }
+        tokens:
+          type: array
+          items: { $ref: '#/components/schemas/PayoutToken' }
+
+    PayoutBalance:
+      type: object
+      required: [chain, token, tokenAddress, balanceCents]
+      properties:
+        chain: { type: string }
+        token: { type: string }
+        tokenAddress: { type: string }
+        balanceCents: { type: string, description: USD cents as a decimal string. }
+
+    PayoutBalancesResponse:
+      type: object
+      required: [balances]
+      properties:
+        balances:
+          type: array
+          items: { $ref: '#/components/schemas/PayoutBalance' }
+
+    PayoutQuoteBody:
+      type: object
+      required: [chain, token, amountCents]
+      additionalProperties: false
+      properties:
+        chain: { $ref: '#/components/schemas/CryptoEvmChain' }
+        token: { $ref: '#/components/schemas/PayoutToken' }
+        amountCents: { type: string, pattern: '^\d+$' }
+
+    PayoutQuoteStats24h:
+      type: object
+      required: [minFeeUsdCents, p25FeeUsdCents, avgFeeUsdCents, p75FeeUsdCents, maxFeeUsdCents]
+      properties:
+        minFeeUsdCents: { type: string }
+        p25FeeUsdCents: { type: string }
+        avgFeeUsdCents: { type: string }
+        p75FeeUsdCents: { type: string }
+        maxFeeUsdCents: { type: string }
+
+    PayoutQuoteResponse:
+      type: object
+      required: [chain, token, amountCents, liveFeeUsdCents, liveTotalDebitCents, stats24h, computedAt]
+      properties:
+        chain: { type: string }
+        token: { type: string }
+        amountCents: { type: string }
+        liveFeeUsdCents: { type: string, description: 'Live network fee in USD cents. "0" on L2 chains.' }
+        liveTotalDebitCents: { type: string, description: amountCents + liveFeeUsdCents. }
+        stats24h: { $ref: '#/components/schemas/PayoutQuoteStats24h' }
+        computedAt: { type: string, format: date-time }
+
+    PayoutWithdrawBody:
+      type: object
+      required: [chain, token, destination, amountCents, externalId]
+      additionalProperties: false
+      properties:
+        chain: { $ref: '#/components/schemas/CryptoEvmChain' }
+        token: { $ref: '#/components/schemas/PayoutToken' }
+        destination: { type: string, pattern: '^0x[a-fA-F0-9]{40}$' }
+        amountCents: { type: string, pattern: '^\d+$' }
+        externalId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Idempotency key. Replaying the same value returns the original withdrawal.
+        forSubUser:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Sub-user UUID or merchant externalId. Attribution only — funds come from merchant custody.
+        maxFeeUsdCents:
+          type: string
+          pattern: '^\d+$'
+          description: Reject the withdrawal if the live network fee exceeds this ceiling (checked at request and broadcast).
+
+    PayoutWithdrawResponse:
+      type: object
+      required: [id, status, chain, token, destination, amountCents, feeCents, externalId, forUserId, forUserExternalId, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/PayoutWithdrawalStatus' }
+        chain: { type: string }
+        token: { type: string }
+        destination: { type: string }
+        amountCents: { type: string }
+        feeCents: { type: string }
+        externalId: { type: string }
+        forUserId: { type: [string, "null"] }
+        forUserExternalId: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+
+    PayoutWithdrawalDetail:
+      type: object
+      required: [id, status, amountCents, feeCents, callbackAttempts, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/PayoutWithdrawalStatus' }
+        chain: { type: [string, "null"] }
+        token: { type: [string, "null"] }
+        tokenAddress: { type: [string, "null"] }
+        destination: { type: [string, "null"] }
+        amountCents: { type: string }
+        feeCents: { type: string }
+        txHash: { type: [string, "null"] }
+        failureReason: { type: [string, "null"] }
+        externalId: { type: [string, "null"] }
+        forUserId: { type: [string, "null"] }
+        forUserExternalId: { type: [string, "null"] }
+        callbackAttempts: { type: integer }
+        createdAt: { type: string, format: date-time }
+        broadcastAt: { type: [string, "null"], format: date-time }
+        confirmedAt: { type: [string, "null"], format: date-time }
+
+    PayoutWithdrawalListResponse:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PayoutWithdrawalDetail' }
+        nextCursor: { type: [string, "null"] }
 
     # ─────────────────────────────────────────────────────────────────────
     # Sub-user profile + Steam trade URLs
@@ -2342,6 +2490,178 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─────────────────────────────────────────────────────────────────────
+  # PARTNER CRYPTO PAYOUT CUSTODY — Merchant context
+  # ─────────────────────────────────────────────────────────────────────
+  /user/wallet/payout/crypto/address:
+    get:
+      operationId: getPayoutAddress
+      tags: [Payouts]
+      summary: Get the payout custody funding address
+      description: |
+        **Auth context:** merchant. Requires `cryptoPayoutEnabled` on the account.
+
+        Shared EVM forwarder address used to fund payout custody; idempotent.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PayoutAddressResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /user/wallet/payout/crypto/balances:
+    get:
+      operationId: getPayoutBalances
+      tags: [Payouts]
+      summary: List payout custody balances
+      description: |
+        **Auth context:** merchant. Requires `cryptoPayoutEnabled`.
+
+        Per-(chain, token) custody balance, in USD cents.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PayoutBalancesResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /user/wallet/payout/crypto/withdraw/quote:
+    post:
+      operationId: quotePayoutWithdrawal
+      tags: [Payouts]
+      summary: Quote a payout withdrawal
+      description: |
+        **Auth context:** merchant. Requires `cryptoPayoutEnabled`. **Rate limit: 60/min.**
+
+        Advisory live network-fee estimate plus 24h gas stats. Fees are `"0"` on L2 chains.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PayoutQuoteBody' }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PayoutQuoteResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /user/wallet/payout/crypto/withdraw:
+    post:
+      operationId: createPayoutWithdrawal
+      tags: [Payouts]
+      summary: Request a crypto payout
+      description: |
+        **Auth context:** merchant (API key only — JWT is rejected). Requires
+        `cryptoPayoutEnabled` **and** a provisioned webhook signing secret.
+
+        Locks `amountCents + fee` from custody and sends a signed
+        `payout.crypto.withdraw.approval` POST to your callback URL: return `2xx`
+        to release funds, `4xx` to reject (auto-refunded). `externalId` is the
+        idempotency key — replaying the same value returns the original
+        withdrawal (`200`), not an error; `1824` is only returned on a genuine
+        concurrent duplicate.
+
+        Error keys: `1820 CRYPTO_PAYOUT_NOT_ENABLED`, `1821 CRYPTO_PAYOUT_FEE_EXCEEDS_MAX`,
+        `1822 CRYPTO_PAYOUT_INSUFFICIENT_BALANCE`, `1823 CRYPTO_PAYOUT_NO_CALLBACK_URL`,
+        `1824 CRYPTO_PAYOUT_DUPLICATE_EXTERNAL_ID`, `1825 CRYPTO_PAYOUT_INVALID_SUBUSER`,
+        `1826 CRYPTO_PAYOUT_FEE_UNAVAILABLE`, `1827 CRYPTO_PAYOUT_NO_SIGNING_KEY`,
+        `1010 WITHDRAWAL_DAILY_LIMIT`, `1504 INVALID_AMOUNT`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PayoutWithdrawBody' }
+      responses:
+        '200':
+          description: Withdrawal accepted (status `pending_callback`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PayoutWithdrawResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '503':
+          description: '`1826 CRYPTO_PAYOUT_FEE_UNAVAILABLE` — gas/price oracle unavailable on a fee chain; retry shortly.'
+
+  /user/wallet/payout/crypto/withdrawals/{id}:
+    get:
+      operationId: getPayoutWithdrawal
+      tags: [Payouts]
+      summary: Get a payout withdrawal
+      description: '**Auth context:** merchant.'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PayoutWithdrawalDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /user/wallet/payout/crypto/withdrawals:
+    get:
+      operationId: listPayoutWithdrawals
+      tags: [Payouts]
+      summary: List payout withdrawals
+      description: '**Auth context:** merchant. Cursor-paginated, newest first.'
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/PayoutWithdrawalStatus' } }
+        - { name: chain, in: query, schema: { $ref: '#/components/schemas/CryptoEvmChain' } }
+        - { name: forUserId, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PayoutWithdrawalListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   # ─────────────────────────────────────────────────────────────────────
   # CATALOG

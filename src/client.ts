@@ -8,6 +8,7 @@ import { ProfileModule } from './modules/profile.js';
 import { TradeUrlsModule } from './modules/tradeUrls.js';
 import { WalletModule } from './modules/wallet.js';
 import { DepositsModule } from './modules/deposits.js';
+import { PayoutsModule } from './modules/payouts.js';
 import { MarketModule } from './modules/market.js';
 import { buildScoped, type ScopedClient } from './modules/scoped.js';
 import type { Envelope } from './types/api.js';
@@ -23,6 +24,7 @@ export class Skinshark {
   readonly account: AccountModule;
   readonly users: UsersModule;
   readonly trades: TradesModule;
+  readonly payouts: PayoutsModule;
 
   // Actor-context (run as merchant by default; flip with opts.onBehalfOf)
   readonly profile: ProfileModule;
@@ -40,6 +42,7 @@ export class Skinshark {
     this.account = new AccountModule(this.http);
     this.users = new UsersModule(this.http);
     this.trades = new TradesModule(this.http);
+    this.payouts = new PayoutsModule(this.http);
     this.profile = new ProfileModule(this.http);
     this.tradeUrls = new TradeUrlsModule(this.http);
     this.wallet = new WalletModule(this.http);

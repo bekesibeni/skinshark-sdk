@@ -21,7 +21,16 @@ export type DepositEventType =
   | 'deposit.refunded'
   | 'deposit.cancelled';
 
-export type WebhookEventType = TradeEventType | DepositEventType;
+// `approval` is the synchronous, signed pre-broadcast call — respond 2xx to release funds, 4xx to
+// reject. The rest are async lifecycle notifications; `refunded` is the single terminal failure event.
+export type PayoutCryptoEventType =
+  | 'payout.crypto.deposit.completed'
+  | 'payout.crypto.withdraw.approval'
+  | 'payout.crypto.withdraw.broadcast'
+  | 'payout.crypto.withdraw.confirmed'
+  | 'payout.crypto.withdraw.refunded';
+
+export type WebhookEventType = TradeEventType | DepositEventType | PayoutCryptoEventType;
 
 export interface SerializedWebhookDeposit {
   id: string;
@@ -44,6 +53,28 @@ export interface SerializedWebhookDeposit {
   sweptAt: string | null;
 }
 
+export interface SerializedPayoutWithdrawal {
+  id: string;
+  userId: string;
+  externalId: string | null;
+  forUserId: string | null;
+  forUserExternalId: string | null;
+  status: string;
+  chain: string | null;
+  token: string | null;
+  tokenAddress: string | null;
+  destination: string | null;
+  amountCents: number;
+  feeCents: number;
+  amountWei: string | null;
+  txHash: string | null;
+  failureReason: string | null;
+  callbackAttempts: number;
+  createdAt: string;
+  broadcastAt: string | null;
+  confirmedAt: string | null;
+}
+
 export interface TradeEventData {
   trade: Trade;
   settlement?: { houseFeeCents: number; merchantFeeCents: number };
@@ -51,6 +82,15 @@ export interface TradeEventData {
 
 export interface DepositEventData {
   deposit: SerializedWebhookDeposit;
+}
+
+export interface PayoutCryptoDepositEventData {
+  deposit: SerializedWebhookDeposit;
+  forUserExternalId: string | null;
+}
+
+export interface PayoutCryptoWithdrawalEventData {
+  withdrawal: SerializedPayoutWithdrawal;
 }
 
 interface BaseEnvelope<TType extends WebhookEventType, TData> {
@@ -62,6 +102,15 @@ interface BaseEnvelope<TType extends WebhookEventType, TData> {
 
 export type TradeEvent = BaseEnvelope<TradeEventType, TradeEventData>;
 export type DepositEvent = BaseEnvelope<DepositEventType, DepositEventData>;
+export type PayoutCryptoDepositEvent = BaseEnvelope<
+  'payout.crypto.deposit.completed',
+  PayoutCryptoDepositEventData
+>;
+export type PayoutCryptoWithdrawalEvent = BaseEnvelope<
+  Exclude<PayoutCryptoEventType, 'payout.crypto.deposit.completed'>,
+  PayoutCryptoWithdrawalEventData
+>;
+export type PayoutCryptoEvent = PayoutCryptoDepositEvent | PayoutCryptoWithdrawalEvent;
 
 /** Discriminated union of every webhook event delivered to your URL. */
-export type WebhookEvent = TradeEvent | DepositEvent;
+export type WebhookEvent = TradeEvent | DepositEvent | PayoutCryptoEvent;

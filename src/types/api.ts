@@ -1,5 +1,5 @@
 import type {
-  ListingId, TradeId, ItemId, FundingId, DepositId, TradeUrlId,
+  ListingId, TradeId, ItemId, FundingId, DepositId, WithdrawalId, TradeUrlId,
   WalletId, TransactionId, SubUserUuid, MerchantId, SubUserRef, TradeRef,
 } from './branded.js';
 
@@ -285,6 +285,117 @@ export interface CryptoQuoteResponse {
   exchangeRate: number;
   feeBps: number;
   chains: Record<string, CryptoQuoteChainPreview>;
+}
+
+// ── Partner crypto payout custody ────────────────────────────────────
+export type PayoutToken = 'USDT' | 'USDC';
+
+export type PayoutWithdrawalStatus =
+  | 'pending_callback'
+  | 'queued'
+  | 'broadcast'
+  | 'confirmed'
+  | 'refunded';
+
+export interface PayoutAddressResponse {
+  address: string;
+  chains: CryptoEvmChain[];
+  tokens: PayoutToken[];
+}
+
+export interface PayoutBalance {
+  chain: string;
+  token: string;
+  tokenAddress: string;
+  balanceCents: string;
+}
+
+export interface PayoutBalancesResponse {
+  balances: PayoutBalance[];
+}
+
+export interface PayoutQuoteBody {
+  chain: CryptoEvmChain;
+  token: PayoutToken;
+  amountCents: string;
+}
+
+export interface PayoutQuoteStats24h {
+  minFeeUsdCents: string;
+  p25FeeUsdCents: string;
+  avgFeeUsdCents: string;
+  p75FeeUsdCents: string;
+  maxFeeUsdCents: string;
+}
+
+export interface PayoutQuoteResponse {
+  chain: string;
+  token: string;
+  amountCents: string;
+  liveFeeUsdCents: string;
+  liveTotalDebitCents: string;
+  stats24h: PayoutQuoteStats24h;
+  computedAt: string;
+}
+
+export interface PayoutWithdrawBody {
+  chain: CryptoEvmChain;
+  token: PayoutToken;
+  destination: string;
+  amountCents: string;
+  /** Idempotency key — replaying the same value returns the original withdrawal. */
+  externalId: string;
+  /** Sub-user UUID or merchant externalId; attribution only, funds come from merchant custody. */
+  forSubUser?: string;
+  /** Reject (not just fail-open) if the live network fee exceeds this ceiling. */
+  maxFeeUsdCents?: string;
+}
+
+export interface PayoutWithdrawResponse {
+  id: WithdrawalId;
+  status: PayoutWithdrawalStatus;
+  chain: string;
+  token: string;
+  destination: string;
+  amountCents: string;
+  feeCents: string;
+  externalId: string;
+  forUserId: string | null;
+  forUserExternalId: string | null;
+  createdAt: string;
+}
+
+export interface PayoutWithdrawalDetail {
+  id: WithdrawalId;
+  status: PayoutWithdrawalStatus;
+  chain: string | null;
+  token: string | null;
+  tokenAddress: string | null;
+  destination: string | null;
+  amountCents: string;
+  feeCents: string;
+  txHash: string | null;
+  failureReason: string | null;
+  externalId: string | null;
+  forUserId: string | null;
+  forUserExternalId: string | null;
+  callbackAttempts: number;
+  createdAt: string;
+  broadcastAt: string | null;
+  confirmedAt: string | null;
+}
+
+export interface PayoutWithdrawalListResponse {
+  items: PayoutWithdrawalDetail[];
+  nextCursor: string | null;
+}
+
+export interface PayoutWithdrawalListQuery {
+  status?: PayoutWithdrawalStatus;
+  chain?: CryptoEvmChain;
+  forUserId?: string;
+  limit?: number;
+  cursor?: string;
 }
 
 // ── Deposit cancel/resume ────────────────────────────────────────────

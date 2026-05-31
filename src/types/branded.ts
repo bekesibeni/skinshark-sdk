@@ -6,6 +6,7 @@ export type TradeId = Brand<string, 'TradeId'>;
 export type ItemId = Brand<string, 'ItemId'>;
 export type FundingId = Brand<string, 'FundingId'>;
 export type DepositId = Brand<string, 'DepositId'>;
+export type WithdrawalId = Brand<string, 'WithdrawalId'>;
 export type TradeUrlId = Brand<string, 'TradeUrlId'>;
 export type WalletId = Brand<string, 'WalletId'>;
 export type TransactionId = Brand<string, 'TransactionId'>;
