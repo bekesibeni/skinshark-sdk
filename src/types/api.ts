@@ -755,6 +755,12 @@ export interface MarketPricesQuery {
   limit?: number;
 }
 
+export interface MarketLiveQuery {
+  page?: number;
+  /** 1–500 per page, or -1 to return the whole feed in one response. */
+  limit?: number;
+}
+
 export interface ListListingsQuery {
   page?: number;
   limit?: number;

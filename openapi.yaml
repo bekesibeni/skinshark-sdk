@@ -2897,6 +2897,42 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
+  /market:
+    get:
+      operationId: getLiveMarket
+      tags: [Market]
+      summary: Curated live-market feed (snapshot)
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required.
+
+        Full snapshot of the admin-curated live market — the cheapest live
+        listings across the watched items, sorted cheapest-first, with the
+        sub-user's fee already applied. Served fresh from the live cache (no
+        outward caching). Each `items[].id` is a buyable listing id — pass it
+        straight to `/market/buy`.
+
+        Subsequent changes stream over
+        `wss://api.skinshark.gg/market/live?scope=watchlist`. Defaults return
+        the whole feed; `page`/`limit` page through it.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ListingsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
   # ─────────────────────────────────────────────────────────────────────
   # TRADING
   # ─────────────────────────────────────────────────────────────────────
@@ -3068,8 +3104,10 @@ paths:
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required.
 
-        Returns a 1-hour JWT scoped to `[deposit, trade]`. Pass it as the
-        `?token=` query string when opening `wss://api.skinshark.gg/ws`.
+        Returns a 1-hour JWT scoped to `[deposit, trade, market]`. Pass it as
+        the `?token=` query string when opening `wss://api.skinshark.gg/ws`
+        (deposit + trade events) or `wss://api.skinshark.gg/market/live` (the
+        `market` scope — live-market feed).
 
         Tokens are bound to the sub-user resolved from `On-Behalf-Of` — the
         WebSocket only receives events for that user. To watch multiple
@@ -3175,3 +3213,56 @@ paths:
               schema: { $ref: '#/components/schemas/WsEvent' }
         '4XX':
           description: '(reference only — this path has no HTTP endpoint)'
+
+  /market/live:
+    get:
+      operationId: marketLiveConnect
+      tags: [WebSocket]
+      summary: Live-market WebSocket (HTTP upgrade)
+      description: |
+        **Auth context:** sub-user — token from `POST /auth/ws-token` (must
+        carry the `market` scope).
+
+        Open with
+        `wss://api.skinshark.gg/market/live?token=<wsToken>&scope=<scope>`:
+
+        - `scope=watchlist` — deltas for the curated live market (the same feed
+          served by `GET /market`).
+        - `scope=all` (default) — the full C5 firehose: every market event,
+          transformed to our format but not DB-enriched. Uncached, WS-only.
+
+        **Read-only.** Any client → server frame closes the socket with code
+        `4002`. On connect the server sends `{ event: "market.ready", data: {
+        scope }, ts }`, then streams deltas. Prices carry the sub-user's fee.
+
+        ### Events
+
+        Each frame has the shape `{ event, data, ts }` where `ts` is Unix epoch
+        ms.
+
+        - `market.new` → a listing appeared. `data` is a `MarketListing`.
+        - `market.update` → a listing's price/fields changed. `data` is a `MarketListing`.
+        - `market.remove` → a listing is gone. `data` is `{ listingId, ourItemId? }`.
+
+        Treat `market.new` and `market.update` identically — upsert the listing
+        keyed by `data.id`. On `market.remove`, drop it by `data.listingId`.
+
+        ### Close codes
+
+        | Code | Reason          | Cause                                          |
+        |------|-----------------|------------------------------------------------|
+        | 4001 | Missing token   | No `?token=` query string                      |
+        | 4001 | Invalid token   | Bad signature, expired, or wrong purpose       |
+        | 4002 | Read-only       | Client sent any frame after upgrade            |
+        | 4003 | Missing scope   | Token lacks the `market` scope                 |
+        | 4008 | Too many        | Per-user (5) or total (10k) connection cap reached |
+      parameters:
+        - { name: token, in: query, required: true, schema: { type: string, minLength: 1 } }
+        - name: scope
+          in: query
+          schema: { type: string, enum: [all, watchlist], default: all }
+      responses:
+        '101':
+          description: Switching Protocols — WebSocket handshake completed.
+        '400':
+          description: Upgrade required / missing token (HTTP path).

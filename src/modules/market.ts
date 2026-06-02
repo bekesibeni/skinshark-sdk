@@ -6,6 +6,7 @@ import type {
   TransactionListResponse, Trade, CancelItemResponse,
   SearchQuery, ListListingsQuery, ListMarketTradesQuery,
   MarketPricesQuery, MarketPricesResponse,
+  MarketLiveQuery,
 } from '../types/api.js';
 import type { ListingId, ItemId, TradeRef } from '../types/branded.js';
 
@@ -55,6 +56,11 @@ export class MarketModule {
   /** Bulk per-item floors: instant (C5 auto-deliver) + standard, after fee. `limit: -1` returns the whole catalog. */
   prices(query?: MarketPricesQuery, opts?: RequestOptions): Promise<MarketPricesResponse> {
     return this.http.request<MarketPricesResponse>('GET', 'market/prices', { query, opts });
+  }
+
+  /** Curated live-market snapshot: cheapest live listings across the watched items, cheapest-first, after fee. `limit: -1` returns the whole feed. */
+  live(query?: MarketLiveQuery, opts?: RequestOptions): Promise<ListingsResponse> {
+    return this.http.request<ListingsResponse>('GET', 'market', { query, opts });
   }
 
   /** Item detail with per-marketplace price + count overview. */

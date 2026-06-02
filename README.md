@@ -152,6 +152,23 @@ for (const p of page.items) {
 const all = await sdk.market.prices({ limit: -1 });
 ```
 
+## Live market
+
+```ts
+// Curated live-market snapshot: the cheapest live listings across the
+// admin-watched items, cheapest-first, with the sub-user's fee applied.
+// Each item's `id` is buyable via `market.buy`. Defaults return the whole
+// feed; page through it with page/limit.
+const feed = await sdk.market.live({ limit: 100 });
+for (const l of feed.items) {
+  console.log(l.id, l.marketHashName, l.price);
+}
+```
+
+For a live push stream of the same feed (plus the full C5 firehose), open the
+`wss://api.skinshark.gg/market/live` WebSocket with a `market`-scoped token from
+`POST /auth/ws-token` — see the OpenAPI spec. The SDK itself is HTTP-only.
+
 ## Creating sub-users
 
 ```ts
