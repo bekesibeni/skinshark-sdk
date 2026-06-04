@@ -53,7 +53,7 @@ export class MarketModule {
     return this.http.request<SearchResponse>('GET', 'market/search', { query, opts });
   }
 
-  /** Bulk per-item floors: instant (C5 auto-deliver) + standard, after fee. `limit: -1` returns the whole catalog. */
+  /** Bulk per-item floors: instant (C5 auto-deliver) + standard, after fee. `limit: -1` returns the whole catalog. Merchant account only — not available via On-Behalf-Of. */
   prices(query?: MarketPricesQuery, opts?: RequestOptions): Promise<MarketPricesResponse> {
     return this.http.request<MarketPricesResponse>('GET', 'market/prices', { query, opts });
   }

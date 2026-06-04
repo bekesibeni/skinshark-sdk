@@ -489,7 +489,12 @@ export interface SearchResultItem {
   category?: ItemCategory;
   collection?: string;
   floatRange?: [number, number];
-  price?: number;
+  /**
+   * Both prices are fee-applied. `standard` is the overall lowest (manual);
+   * `instant` is the auto-deliver floor (C5 today), null when no instant
+   * listing exists. Omitted entirely when the item has no market price.
+   */
+  price?: { standard: number; instant: number | null };
   listingsCount?: number;
   steamPrice?: number;
 }
@@ -655,7 +660,7 @@ export interface Trade {
   status: TradeStatus;
   game: string;
   items: TradeItem[];
-  summary: { total: number; completed: number; failed: number };
+  summary: { total: number; delivered: number; completed: number; failed: number };
   totalPrice: number;
   currency: Currency;
   holdEndDate?: string;

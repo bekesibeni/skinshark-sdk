@@ -969,7 +969,13 @@ components:
           minItems: 2
           maxItems: 2
           items: { type: number }
-        price: { type: number }
+        price:
+          type: object
+          description: Standard = overall lowest (manual). Instant = auto-deliver floor (C5 today), null when none. Both fee-applied.
+          required: [standard, instant]
+          properties:
+            standard: { type: number }
+            instant: { type: [number, "null"] }
         listingsCount: { type: number }
         steamPrice: { type: number }
 

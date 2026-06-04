@@ -118,6 +118,7 @@ export type ErrorKey =
   | 'TRADE_CANCEL_TOO_SOON'
   | 'INTERNAL'
   | 'MAINTENANCE_MODE'
+  | 'SERVICE_DISABLED'
   | 'SDK_TIMEOUT'
   | 'SDK_NETWORK'
   | 'SDK_ABORTED'
@@ -136,6 +137,7 @@ export const ERROR_STATUS: Record<string, number> = {
   CONFLICT: 409, EMAIL_TAKEN: 409, IDEMPOTENCY_CONFLICT: 409, PRICE_MISMATCH: 409,
   RATE_LIMITED: 429,
   INSUFFICIENT_BALANCE: 422,
+  SERVICE_DISABLED: 503, MAINTENANCE_MODE: 503,
 };
 
 // Category sets used by isAuthError / isRateLimited / isValidationError.
