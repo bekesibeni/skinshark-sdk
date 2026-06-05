@@ -17,20 +17,20 @@ export interface BuyOptions extends RequestOptions {
 export class MarketTradesModule {
   constructor(private readonly http: HttpClient) {}
 
-  /** Actor's own trades, page-paginated. */
+  /** Actor's own trades, cursor-paginated. */
   list(query?: ListMarketTradesQuery, opts?: RequestOptions): Promise<TransactionListResponse> {
-    return this.http.request<TransactionListResponse>('GET', 'market/trades', { query, opts });
+    return this.http.request<TransactionListResponse>('GET', 'market/transactions', { query, opts });
   }
 
   get(tradeId: TradeRef, opts?: RequestOptions): Promise<Trade> {
-    return this.http.request<Trade>('GET', `market/trades/${encodeURIComponent(tradeId)}`, { opts });
+    return this.http.request<Trade>('GET', `market/transactions/${encodeURIComponent(tradeId)}`, { opts });
   }
 
   /** Best-effort — marketplace must accept the cancel; check response.status. */
   cancelItem(tradeId: TradeRef, itemId: string, opts?: RequestOptions): Promise<CancelItemResponse> {
     return this.http.request<CancelItemResponse>(
       'POST',
-      `market/trades/${encodeURIComponent(tradeId)}/items/${encodeURIComponent(itemId)}/cancel`,
+      `market/transactions/${encodeURIComponent(tradeId)}/items/${encodeURIComponent(itemId)}/cancel`,
       { opts },
     );
   }

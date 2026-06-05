@@ -1309,7 +1309,7 @@ components:
 
     TransactionListResponse:
       type: object
-      description: Sub-user transaction list (`/market/trades`). Cursor-paginated.
+      description: Sub-user transaction list (`/market/transactions`). Cursor-paginated.
       required: [items, nextCursor]
       properties:
         items:
@@ -3018,7 +3018,7 @@ paths:
         '422': { $ref: '#/components/responses/ValidationFailed' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
-  /market/trades:
+  /market/transactions:
     get:
       operationId: listMarketTransactions
       tags: [Market]
@@ -3045,7 +3045,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
-  /market/trades/{tradeId}:
+  /market/transactions/{tradeId}:
     get:
       operationId: getMarketTransaction
       tags: [Market]
@@ -3069,7 +3069,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /market/trades/{tradeId}/items/{itemId}/cancel:
+  /market/transactions/{tradeId}/items/{itemId}/cancel:
     post:
       operationId: cancelMarketTransactionItem
       tags: [Market]
