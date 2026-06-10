@@ -589,7 +589,10 @@ export interface ListingsResponse {
 
 // ── Trades ───────────────────────────────────────────────────────────
 export interface BuyItem {
-  listingId: ListingId | string;
+  /** From `MarketListing.id`. Provide exactly one of `listingId` or `listingRawId`. */
+  listingId?: ListingId | string;
+  /** Raw listing id. Alternative to `listingId`. */
+  listingRawId?: string;
   /** Decimal max acceptable unit price, e.g. "5.50". */
   maxPrice: string;
 }
