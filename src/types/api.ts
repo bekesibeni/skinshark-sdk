@@ -512,6 +512,8 @@ export interface MarketPrice {
   marketHashName: string;
   instant: number | null; // C5 auto-deliver floor, after fee
   standard: number | null; // blended C5 + Eco floor (matches search price), after fee
+  /** Per-Doppler-phase standard prices (EcoSteam only), after fee. Present only for phased items. */
+  phases?: Partial<Record<DopplerPhase, number>>;
 }
 
 export interface MarketPricesResponse {
@@ -617,6 +619,8 @@ export interface QuickBuyBody {
   maxPrice: string;
   amount: number;
   delivery: DeliveryMode;
+  /** Doppler phase to buy. EcoSteam-only: routed exclusively to EcoSteam and priced against the phase floor. Cannot be combined with `delivery: 'instant'`. */
+  phase?: DopplerPhase;
   tradeUrl?: string;
   externalId?: string;
 }

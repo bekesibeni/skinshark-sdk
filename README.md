@@ -136,6 +136,14 @@ const filled = await sdk.market.quickBuy(
   'order-7422',
   { onBehalfOf: 'user-42' },
 );
+
+// Doppler phase buy: EcoSteam-only, priced against the phase floor.
+// `phase` cannot be combined with delivery: 'instant'.
+const phaseBuy = await sdk.market.quickBuy(
+  { itemId: 'bayonet-doppler-fn', maxPrice: '1900.00', amount: 1, delivery: 'standard', phase: 'Ruby' },
+  'order-7423',
+  { onBehalfOf: 'user-42' },
+);
 ```
 
 ## Price feed
@@ -146,6 +154,8 @@ const filled = await sdk.market.quickBuy(
 const page = await sdk.market.prices({ page: 1, limit: 100 });
 for (const p of page.items) {
   console.log(p.itemId, p.marketHashName, p.instant, p.standard);
+  // Doppler items also carry `phases` — per-phase standard prices (EcoSteam), after fee.
+  if (p.phases) console.log(p.phases); // e.g. { 'Phase 1': 402.26, Ruby: 1875.92 }
 }
 
 // Whole catalog in one response (large payload):
