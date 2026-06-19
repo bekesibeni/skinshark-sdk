@@ -229,7 +229,11 @@ components:
     WalletStatus: { type: string, enum: [active, suspended, closed] }
     TradeStatus:
       type: string
-      enum: [initiated, pending, active, hold, completed, failed, reverted]
+      enum: [initiated, pending, active, hold, completed, failed, canceled, declined, reverted]
+      description: |
+        Terminal outcomes — `completed` (delivered), `failed` (couldn't be placed/delivered; see item `error`),
+        `canceled` (canceled before delivery — full refund, no penalty), `declined` (buyer-fault decline after the
+        Steam offer was sent — refund minus a 2% penalty), `reverted` (delivered then recalled by the supplier).
     DepositStatus:
       type: string
       enum: [initiated, pending, completed, partial, expired, cancelled, refunded, failed]
@@ -1276,11 +1280,16 @@ components:
             pattern: { type: string }
             iconUrl: { type: string }
         delivery: { type: string }
-        status:
-          type: string
-          description: Per-item purchase status (uppercase).
+        status: { $ref: '#/components/schemas/TradeStatus' }
         tradable: { type: boolean }
-        error: { type: string }
+        error:
+          type: string
+          enum: [LISTING_UNAVAILABLE, PRICE_CHANGED, TRADE_URL_INVALID, STEAM_ACCOUNT_RESTRICTED, MARKET_UNAVAILABLE, PURCHASE_FAILED]
+          description: |
+            Set when the item `status` is `failed`. `canceled`/`declined` items carry no code; the status is the outcome.
+        errorDetail:
+          type: string
+          description: 'Raw marketplace reason for debugging (e.g. "c5:ITEM_SOLD item already sold"). Not stable — do not branch on it.'
 
     Trade:
       type: object
@@ -1499,7 +1508,7 @@ components:
       properties:
         event:
           type: string
-          description: '`trade.<status>` — e.g. `trade.completed`, `trade.failed`.'
+          description: '`trade.<status>` — e.g. `trade.completed`, `trade.failed`, `trade.canceled`, `trade.declined`.'
           example: trade.completed
         data: { $ref: '#/components/schemas/Trade' }
         ts: { type: integer }

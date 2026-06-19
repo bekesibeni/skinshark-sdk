@@ -18,7 +18,9 @@ export type Role = 'user' | 'merchant' | 'admin';
 export type TwoFactorMethod = 'email' | 'totp';
 export type WalletType = 'spot' | 'earnings';
 export type WalletStatus = 'active' | 'suspended' | 'closed';
-export type TradeStatus = 'initiated' | 'pending' | 'active' | 'hold' | 'completed' | 'failed' | 'reverted';
+export type TradeStatus = 'initiated' | 'pending' | 'active' | 'hold' | 'completed' | 'failed' | 'canceled' | 'declined' | 'reverted';
+/** Stable partner-facing failure code, set on a trade item's `error` when its `status` is `failed`. */
+export type TradeFailureCode = 'LISTING_UNAVAILABLE' | 'PRICE_CHANGED' | 'TRADE_URL_INVALID' | 'STEAM_ACCOUNT_RESTRICTED' | 'MARKET_UNAVAILABLE' | 'PURCHASE_FAILED';
 export type DepositStatus = 'initiated' | 'pending' | 'completed' | 'partial' | 'expired' | 'cancelled' | 'refunded' | 'failed';
 export type DepositMethod = 'gatepay' | 'onramp' | 'crypto';
 export type DepositCurrency = 'USDT' | 'USDC' | 'DAI' | 'BTC' | 'ETH' | 'SOL';
@@ -651,9 +653,12 @@ export interface TradeItem {
   stickers?: Array<{ name: string; slot: number; wear?: number; iconUrl: string }>;
   charm?: { name: string; pattern?: string; iconUrl: string };
   delivery?: string;
-  status?: string;
+  status?: TradeStatus;
   tradable?: boolean;
-  error?: string;
+  /** Set when `status` is `failed` — one of the stable TradeFailureCode values. */
+  error?: TradeFailureCode;
+  /** Raw marketplace reason for debugging (e.g. "c5:ITEM_SOLD item already sold"). Not stable — don't switch on it. */
+  errorDetail?: string;
 }
 
 export interface Trade {

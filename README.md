@@ -308,7 +308,9 @@ app.post('/webhooks/skinshark',
 
       switch (event.type) {
         case 'trade.completed':  /* event.data.trade */ break;
-        case 'trade.failed':     /* event.data.trade.error */ break;
+        case 'trade.failed':     /* items[].error — a TradeFailureCode */ break;
+        case 'trade.canceled':   /* canceled before delivery — full refund */ break;
+        case 'trade.declined':   /* buyer-fault decline — refund minus 2% penalty */ break;
         case 'deposit.completed':/* event.data.deposit */ break;
         // ...
       }
@@ -343,12 +345,30 @@ const event = verifyWebhook(req.body, req.headers, {
 });
 ```
 
+## Trade outcomes
+
+A buy trade ends in one of five terminal states (each item carries its own; the
+trade status rolls them up):
+
+| Status | Meaning | Refund |
+| --- | --- | --- |
+| `completed` | Items delivered and the hold released. | — |
+| `failed` | The purchase couldn't be placed/delivered. `items[].error` carries a `TradeFailureCode`. | Full |
+| `canceled` | Canceled before delivery — by the platform, or by the user while still `pending`. | Full |
+| `declined` | Buyer's fault after the Steam offer went out (declined / let it expire). | Full minus a 2% penalty |
+| `reverted` | Delivered, then recalled/refunded by the supplier. | Full |
+
+On a `failed` item, `error` is one of `LISTING_UNAVAILABLE`, `PRICE_CHANGED`,
+`TRADE_URL_INVALID`, `STEAM_ACCOUNT_RESTRICTED`, `MARKET_UNAVAILABLE`,
+`PURCHASE_FAILED`. The optional `errorDetail` carries the raw marketplace reason
+for debugging — treat it as opaque, don't branch on it.
+
 ## Enum casing
 
 All status/type enums on the wire are **lowercase**:
 
 ```bash
-TradeStatus    initiated / pending / active / hold / completed / failed / reverted
+TradeStatus    initiated / pending / active / hold / completed / failed / canceled / declined / reverted
 TradeType      buy / sell
 RevertedBy     supplier / user
 DeliveryMode   standard / instant

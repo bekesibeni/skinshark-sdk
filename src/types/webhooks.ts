@@ -7,6 +7,8 @@ export type TradeEventType =
   | 'trade.hold'
   | 'trade.completed'
   | 'trade.failed'
+  | 'trade.canceled'
+  | 'trade.declined'
   | 'trade.reverted'
   | 'trade.settled'
   | 'trade.refunded';
