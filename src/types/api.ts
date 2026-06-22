@@ -659,6 +659,16 @@ export interface TradeItem {
   error?: TradeFailureCode;
   /** Raw marketplace reason for debugging (e.g. "c5:ITEM_SOLD item already sold"). Not stable — don't switch on it. */
   errorDetail?: string;
+  /** Present only on refunded items (failed/canceled/declined/reverted). `amount + penalty === price`. */
+  refund?: ItemRefund;
+}
+
+export interface ItemRefund {
+  /** Returned to the buyer, in USD. */
+  amount: number;
+  /** Withheld on buyer fault, in USD; 0 otherwise. */
+  penalty: number;
+  buyerFault: boolean;
 }
 
 export interface Trade {
