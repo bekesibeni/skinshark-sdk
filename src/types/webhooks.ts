@@ -77,9 +77,17 @@ export interface SerializedPayoutWithdrawal {
   confirmedAt: string | null;
 }
 
+export interface TradeRefundInfo {
+  itemId: string;
+  buyerFault: boolean;
+  refunded: number;
+  penalty: number;
+}
+
 export interface TradeEventData {
   trade: Trade;
   settlement?: { houseFeeCents: number; merchantFeeCents: number };
+  refund?: TradeRefundInfo;
 }
 
 export interface DepositEventData {
