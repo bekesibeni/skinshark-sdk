@@ -11,8 +11,14 @@ export class TradesModule {
     return this.http.request<MerchantTradeListResponse>('GET', 'merchant/trades', { query, opts });
   }
 
-  /** `id` accepts trade UUID or your trade externalId. */
-  get(id: TradeRef, opts?: RequestOptions): Promise<Trade> {
-    return this.http.request<Trade>('GET', `merchant/trades/${encodeURIComponent(id)}`, { opts });
+  /** Resolve trades by UUID or your externalId — always an array (pass a single id as `[id]`, up to
+   *  100). Unresolved refs are simply absent from the result, so a reconciliation poller gets
+   *  whatever exists. */
+  get(ids: TradeRef[], opts?: RequestOptions): Promise<Trade[]> {
+    if (ids.length === 0) return Promise.resolve([]);
+    const path = ids.map(encodeURIComponent).join(',');
+    return this.http
+      .request<Trade | Trade[]>('GET', `merchant/trades/${path}`, { opts })
+      .then((r) => (Array.isArray(r) ? r : [r]));
   }
 }
