@@ -2859,15 +2859,17 @@ paths:
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 200/min.**
 
         Live cross-marketplace offers for an item, dispatched to marketplace
-        workers. `market` filters by marketplace index (0 = all). For Doppler
-        knives, optionally filter by `phase`. For float-relevant items, pass
-        `wearMin` + `wearMax` together (both required if either is sent).
+        workers. `market` filters by marketplace index (0 = all). `delivery`
+        filters by delivery mode (`instant` = auto-deliver only); omit for both.
+        For Doppler knives, optionally filter by `phase`. For float-relevant
+        items, pass `wearMin` + `wearMax` together (both required if either is sent).
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
         - { name: itemId, in: path, required: true, schema: { type: string, minLength: 1 } }
         - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
         - { name: market, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: delivery, in: query, schema: { type: string, enum: [standard, instant] } }
         - name: phase
           in: query
           schema:

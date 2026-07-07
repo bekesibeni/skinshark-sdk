@@ -582,6 +582,8 @@ export interface MarketListing {
   }>;
   charm?: { name: string; marketHashName?: string; pattern?: string; iconUrl: string };
   inspectUrl?: string;
+  /** Steam asset id of the listed item, when the supplier provides it. */
+  assetId?: string;
   delivery?: string;
 }
 
@@ -792,6 +794,8 @@ export interface ListListingsQuery {
   page?: number;
   limit?: number;
   market?: number;
+  /** Filter offers by delivery mode; omit for both. */
+  delivery?: DeliveryMode;
   phase?: DopplerPhase;
   wearMin?: number;
   wearMax?: number;
