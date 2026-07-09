@@ -131,4 +131,4 @@ ESM-only. `tsconfig.json` sets `"ignoreDeprecations": "6.0"` because the build's
 
 ## API source
 
-`openapi.yaml` at the root is the OpenAPI 3.1 spec for the SkinShark Merchant API (currently version 0.2.6). It's the canonical source for every endpoint shape. When the API changes, update both the spec file and the matching wire types in `src/types/api.ts` together.
+`openapi.yaml` at the root is the OpenAPI 3.1 spec for the SkinShark Merchant API (currently version 0.4.3). It's the canonical source for every endpoint shape. When the API changes, update both the spec file and the matching wire types in `src/types/api.ts` together.

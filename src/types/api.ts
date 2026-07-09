@@ -19,6 +19,8 @@ export type TwoFactorMethod = 'email' | 'totp';
 export type WalletType = 'spot' | 'earnings';
 export type WalletStatus = 'active' | 'suspended' | 'closed';
 export type TradeStatus = 'initiated' | 'pending' | 'active' | 'hold' | 'completed' | 'failed' | 'canceled' | 'declined' | 'reverted';
+/** `buy` = purchased from a marketplace; `sell` = sold to a SkinShark bot for a payout. */
+export type TradeType = 'buy' | 'sell';
 /** Stable partner-facing failure code, set on a trade item's `error` when its `status` is `failed`. */
 export type TradeFailureCode = 'LISTING_UNAVAILABLE' | 'PRICE_CHANGED' | 'TRADE_URL_INVALID' | 'STEAM_ACCOUNT_RESTRICTED' | 'MARKET_UNAVAILABLE' | 'PURCHASE_FAILED';
 export type DepositStatus = 'initiated' | 'pending' | 'completed' | 'partial' | 'expired' | 'cancelled' | 'refunded' | 'failed';
@@ -675,7 +677,7 @@ export interface ItemRefund {
 
 export interface Trade {
   id: TradeId;
-  type: string;
+  type: TradeType;
   userId: string;
   steamId: string;
   tradeUrl: string;
@@ -710,6 +712,94 @@ export interface CancelItemResponse {
   status: 'cancelled' | 'failed';
 }
 
+// ── Sell (own-bots) ──────────────────────────────────────────────────
+/** GET market/sell/prices */
+export interface SellPricesQuery {
+  search?: string;
+  /** 1–5000. */
+  limit?: number;
+}
+
+export interface SellPrice {
+  marketHashName: string;
+  /** What we pay for this item, USD. */
+  deposit: number;
+  /** Whether the item is currently buyable by our bots. */
+  accepted: boolean;
+}
+
+export type SellPricesResponse = SellPrice[];
+
+/** GET market/sell/inventory */
+export interface SellInventoryQuery {
+  /** Optional; must belong to the user's linked Steam account. */
+  tradeUrl?: string;
+  /** Force a fresh inventory read instead of the cache. */
+  refresh?: boolean;
+}
+
+export interface SellInventoryItem {
+  /** Encoded item id — pass straight to `sell.create` items[].id. */
+  id: string;
+  /** Raw Steam asset id. */
+  assetid: string;
+  name: string;
+  marketHashName: string;
+  type: string;
+  /** Raw Steam icon hash. */
+  iconUrl: string;
+  tradable: boolean;
+  /** Platform reference price, USD; absent when unknown. */
+  marketPrice?: number;
+  /** What we pay for this item, USD. Send this exact value as the sell price. */
+  price: number;
+  /** True when a payout quote exists AND the item is tradable. Only accepted items can be sold. */
+  accepted: boolean;
+  exterior?: string;
+  rarity?: string;
+  color?: string;
+  previewToken?: string;
+  /** Float value as a string. */
+  wear?: string;
+  paintSeed?: number;
+  doppler?: { status: number; name: string; paintIndex?: number };
+  stickers?: Array<{ name: string; slot: number; wear?: number; iconUrl: string }>;
+  charm?: { name: string; pattern?: string; iconUrl: string };
+}
+
+export interface SellInventory {
+  items: SellInventoryItem[];
+  currency: Currency;
+  count: number;
+}
+
+export interface SellItem {
+  /** From `SellInventoryItem.id`. Provide exactly one of `id` or `assetid`. */
+  id?: string;
+  /** Raw Steam asset id. Alternative to `id`. */
+  assetid?: string;
+  /** USD decimal — must equal the live quote (`SellInventoryItem.price` / `SellPrice.deposit`) to the cent, e.g. "12.50". */
+  price: string;
+}
+
+export interface SellBody {
+  /** 1–100 items. */
+  items: SellItem[];
+  /** Must belong to the user's linked Steam account. Omit to use their saved trade URL. */
+  tradeUrl?: string;
+  externalId?: string;
+}
+
+export interface SellResponse {
+  id: TradeId;
+  status: TradeStatus;
+  itemCount: number;
+  /** Payout in the wallet currency, at a locked FX rate. */
+  totalPrice: number;
+  currency: Currency;
+  createdAt: string;
+}
+
 // ── Filter shapes used by list/search endpoints ──────────────────────
 export interface ListSubUsersQuery {
   page?: number;
@@ -737,6 +827,7 @@ export interface ListUserTransactionsQuery {
 }
 
 export interface ListMerchantTradesQuery {
+  type?: TradeType;
   status?: TradeStatus;
   subUserId?: SubUserRef;
   itemName?: string;
@@ -750,6 +841,7 @@ export interface ListMerchantTradesQuery {
 }
 
 export interface ListSubUserTradesQuery {
+  type?: TradeType;
   status?: TradeStatus;
   itemName?: string;
   externalId?: string;
@@ -802,6 +894,7 @@ export interface ListListingsQuery {
 }
 
 export interface ListMarketTradesQuery {
+  type?: TradeType;
   cursor?: string;
   limit?: number;
   status?: TradeStatus;

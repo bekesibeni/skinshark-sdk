@@ -6,7 +6,7 @@ export type {
 } from './client.js';
 
 export { ScopedClient } from './modules/scoped.js';
-export type { BuyOptions } from './modules/market.js';
+export type { BuyOptions, SellOptions } from './modules/market.js';
 
 export type { DebugEvent, DebugHook } from './internal/http.js';
 

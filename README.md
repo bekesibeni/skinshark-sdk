@@ -105,6 +105,7 @@ sdk
 │   ├── listings, listing
 │   ├── buy(items, externalId?, opts?)
 │   ├── quickBuy(body, externalId?, opts?)
+│   ├── sell.{prices,inventory,create(items, externalId?, opts?)}  sell to a SkinShark bot
 │   └── trades.{list,get,cancelItem}                            actor's own trades
 ├── as(ref) → ScopedClient                                      sub-user-bound view
 ├── health()                                                    auth/connectivity check
@@ -144,6 +145,30 @@ const phaseBuy = await sdk.market.quickBuy(
   'order-7423',
   { onBehalfOf: 'user-42' },
 );
+```
+
+## Selling to a bot
+
+Buy CS2 items back from a user into a SkinShark-operated bot; the payout is credited
+from house treasury. Price the user, submit at the exact quote (cent-exact lock), then
+the user accepts a single Steam offer. See the [Selling guide](https://skinshark.gg/docs/guides/selling).
+
+```ts
+const u = sdk.as('user-42');
+
+// 1. Price the user's inventory — only `accepted` items can be sold
+const inv = await u.market.sell.inventory();
+const sellable = inv.items.filter((i) => i.accepted);
+
+// 2. Submit at the exact quoted price
+const sale = await u.market.sell.create(
+  sellable.map((i) => ({ id: i.id, price: i.price.toFixed(2) })),
+  'sell-7424',                         // your correlation id (optional)
+);
+// sale.status === 'initiated' — the user now accepts the Steam offer from the bot.
+
+// Or just read the payout book without touching the inventory:
+const book = await u.market.sell.prices({ search: 'AK-47 | Redline' });
 ```
 
 ## Price feed

@@ -119,7 +119,7 @@ info:
     - the `externalId` you assigned.
 
     The server resolves both, scoped to your merchant.
-  version: "0.3.0"
+  version: "0.4.3"
   contact:
     name: SkinShark Engineering
     email: support@skinshark.gg
@@ -234,6 +234,10 @@ components:
         Terminal outcomes — `completed` (delivered), `failed` (couldn't be placed/delivered; see item `error`),
         `canceled` (canceled before delivery — full refund, no penalty), `declined` (buyer-fault decline after the
         Steam offer was sent — refund minus a 2% penalty), `reverted` (delivered then recalled by the supplier).
+    TradeType:
+      type: string
+      enum: [buy, sell]
+      description: '`buy` = purchased from a marketplace; `sell` = sold to a SkinShark bot for a payout.'
     DepositStatus:
       type: string
       enum: [initiated, pending, completed, partial, expired, cancelled, refunded, failed]
@@ -1148,6 +1152,11 @@ components:
             pattern: { type: string }
             iconUrl: { type: string }
         inspectUrl: { type: string }
+        assetId:
+          type: string
+          description: |
+            Steam asset id of the listed item. Present on catalog search and listing
+            detail only — it is **not** carried on trade or webhook item payloads.
         delivery: { type: string }
 
     ListingsResponse:
@@ -1290,6 +1299,17 @@ components:
         errorDetail:
           type: string
           description: 'Raw marketplace reason for debugging (e.g. "c5:ITEM_SOLD item already sold"). Not stable — do not branch on it.'
+        refund:
+          type: object
+          description: |
+            Present only on refunded items (status `failed`/`canceled`/`declined`/`reverted`), carried on every
+            trade snapshot and webhook. `amount + penalty == price`. On a buyer-fault `declined` a 2% penalty is
+            withheld; otherwise `penalty` is 0 and `amount` equals `price`. Buy trades only — sell items never carry it.
+          required: [amount, penalty, buyerFault]
+          properties:
+            amount: { type: number, description: Returned to the buyer. }
+            penalty: { type: number, description: "Withheld on buyer fault, else 0." }
+            buyerFault: { type: boolean, description: True when the item was declined as the buyer's fault. }
 
     Trade:
       type: object
@@ -1351,6 +1371,131 @@ components:
         ok: { type: boolean, enum: [true] }
         itemId: { type: string, format: uuid }
         status: { type: string, enum: [cancelled, failed] }
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Sell (own-bots)
+    # ─────────────────────────────────────────────────────────────────────
+    Doppler:
+      type: object
+      required: [status, name]
+      properties:
+        status: { type: number }
+        name: { type: string }
+        paintIndex: { type: number }
+
+    Sticker:
+      type: object
+      required: [name, slot, iconUrl]
+      properties:
+        name: { type: string }
+        slot: { type: number }
+        wear: { type: number }
+        iconUrl: { type: string }
+
+    Charm:
+      type: object
+      required: [name, iconUrl]
+      properties:
+        name: { type: string }
+        pattern: { type: string }
+        iconUrl: { type: string }
+
+    SellInventoryItem:
+      type: object
+      required: [id, assetid, name, marketHashName, type, iconUrl, tradable, price, accepted]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Encoded item id — pass straight to `POST /market/sell` items[].id.
+        assetid: { type: string, description: Raw Steam asset id. }
+        name: { type: string }
+        marketHashName: { type: string }
+        type: { type: string }
+        iconUrl: { type: string, description: Raw Steam icon hash. }
+        tradable: { type: boolean }
+        marketPrice: { type: number, description: Platform reference price, USD. Absent when unknown. }
+        price: { type: number, description: What we pay for this item, USD. Send this exact value as the sell price. }
+        accepted: { type: boolean, description: True when a payout quote exists AND the item is tradable. Only accepted items can be sold. }
+        exterior: { type: string }
+        rarity: { type: string }
+        color: { type: string }
+        previewToken: { type: string }
+        wear: { type: string, description: Float value as a string. }
+        paintSeed: { type: number }
+        doppler: { $ref: '#/components/schemas/Doppler' }
+        stickers: { type: array, items: { $ref: '#/components/schemas/Sticker' } }
+        charm: { $ref: '#/components/schemas/Charm' }
+
+    SellInventoryResponse:
+      type: object
+      required: [items, currency, count]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SellInventoryItem' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        count: { type: integer }
+
+    SellPrice:
+      type: object
+      required: [marketHashName, deposit, accepted]
+      properties:
+        marketHashName: { type: string }
+        deposit: { type: number, description: What we pay for this item, USD. }
+        accepted: { type: boolean, description: Whether the item is currently buyable by our bots. }
+
+    SellPricesResponse:
+      type: array
+      description: Skinbolt payout book — what we pay per item.
+      items: { $ref: '#/components/schemas/SellPrice' }
+
+    SellItem:
+      type: object
+      required: [price]
+      additionalProperties: false
+      description: 'Reference the item by `id` (from `/market/sell/inventory`) OR raw `assetid` — exactly one.'
+      properties:
+        id: { type: string, format: uuid, description: Encoded item id from `SellInventoryItem.id`. }
+        assetid: { type: string, minLength: 1, maxLength: 64, description: Raw Steam asset id. Alternative to `id`. }
+        price:
+          type: string
+          pattern: '^\d+(\.\d{1,2})?$'
+          description: 'USD decimal. Must equal the live quote (`SellInventoryItem.price` / `SellPrice.deposit`) to the cent, or the item fails with `PRICE_MISMATCH`.'
+
+    SellBody:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { $ref: '#/components/schemas/SellItem' }
+        tradeUrl:
+          type: string
+          format: uri
+          description: |
+            Optional. Must belong to the same Steam account linked to the user (validated against their
+            `steamId`) — it can only re-point to the user's own trade URL, never redirect payout items
+            elsewhere. Omit to use the user's saved trade URL. Rejected with `TRADEURL_STEAM_MISMATCH`
+            on mismatch.
+        externalId:
+          type: string
+          maxLength: 128
+          description: Your own correlation id, echoed back on the Trade. Idempotent per user.
+
+    SellResponse:
+      type: object
+      required: [id, status, itemCount, totalPrice, currency, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/TradeStatus' }
+        itemCount: { type: integer }
+        totalPrice: { type: number, description: Total payout in the wallet currency, at a locked FX rate. }
+        currency: { $ref: '#/components/schemas/Currency' }
+        createdAt: { type: string }
 
     # ─────────────────────────────────────────────────────────────────────
     # WebSocket
@@ -1985,10 +2130,12 @@ paths:
       description: |
         **Auth context:** merchant only. Cursor-paginated.
 
-        Filters: `status`, `subUserId` (UUID or externalId), `itemName`,
-        `externalId` (your trade externalId), `offerId`, `tradeId`, `from`,
-        `to`.
+        Returns your sub-users' trades, **buy and sell** (as of v0.4.x — previously
+        buy-only). Filters: `type` (`buy`/`sell`), `status`, `subUserId` (UUID or
+        externalId), `itemName`, `externalId` (your trade externalId), `offerId`,
+        `tradeId`, `from`, `to`.
       parameters:
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/TradeType' } }
         - name: status
           in: query
           schema: { $ref: '#/components/schemas/TradeStatus' }
@@ -2019,13 +2166,23 @@ paths:
     get:
       operationId: getMerchantTrade
       tags: [Trades]
-      summary: Get a single trade in merchant scope
-      description: '**Auth context:** merchant only.'
+      summary: Get trade(s) in merchant scope — single or comma-batch
+      description: |
+        **Auth context:** merchant only.
+
+        Look up a trade (buy or sell) by its id or your `externalId`. Pass a single ref to get
+        one `Trade` (404 if it doesn't resolve), or a comma-separated list of up to 100 refs for
+        a batch status poll — that returns an **array** of the trades that resolve (missing refs
+        omitted, no 404). Comma is the delimiter, so ids containing a comma can't be looked up here.
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - name: id
+          in: path
+          required: true
+          description: One trade id/externalId, or up to 100 comma-separated refs (each ≤ 128 chars).
+          schema: { type: string, minLength: 1 }
       responses:
         '200':
-          description: OK.
+          description: A single `Trade` for one ref, or an array of `Trade` for a comma-separated list.
           content:
             application/json:
               schema:
@@ -2033,7 +2190,11 @@ paths:
                   - $ref: '#/components/schemas/Envelope'
                   - type: object
                     properties:
-                      data: { $ref: '#/components/schemas/Trade' }
+                      data:
+                        oneOf:
+                          - $ref: '#/components/schemas/Trade'
+                          - type: array
+                            items: { $ref: '#/components/schemas/Trade' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -2043,9 +2204,10 @@ paths:
       operationId: listSubUserTrades
       tags: [Users]
       summary: List trades for a single sub-user
-      description: '**Auth context:** merchant only. Same filters as `/merchant/trades` minus `subUserId`.'
+      description: '**Auth context:** merchant only. Same filters as `/merchant/trades` minus `subUserId`; includes sell trades.'
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/TradeType' } }
         - name: status
           in: query
           schema: { $ref: '#/components/schemas/TradeStatus' }
@@ -2859,16 +3021,22 @@ paths:
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 200/min.**
 
         Live cross-marketplace offers for an item, dispatched to marketplace
-        workers. `market` filters by marketplace index (0 = all). `delivery`
-        filters by delivery mode (`instant` = auto-deliver only); omit for both.
-        For Doppler knives, optionally filter by `phase`. For float-relevant
-        items, pass `wearMin` + `wearMax` together (both required if either is sent).
+        workers. `market` filters by marketplace index (`0` = all, `3` = C5Game,
+        `4` = EcoSteam, `6` = YouPin; `1` = Steam is sell-only and rejected here).
+        `delivery` filters by delivery mode (`instant` = auto-deliver only); omit
+        for both. For Doppler knives, optionally filter by `phase`. For
+        float-relevant items, pass `wearMin` + `wearMax` together (both required
+        if either is sent).
+
+        Listing ids are opaque and ephemeral; the market index is encoded inside
+        them. Ids minted before the v0.4.x market-index remap are invalidated —
+        always re-read listings before buying rather than caching ids.
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
         - { name: itemId, in: path, required: true, schema: { type: string, minLength: 1 } }
         - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
-        - { name: market, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: market, in: query, description: 'Marketplace index — 0 all, 3 C5Game, 4 EcoSteam, 6 YouPin (1 Steam is sell-only, rejected).', schema: { type: integer, minimum: 0, default: 0 } }
         - { name: delivery, in: query, schema: { type: string, enum: [standard, instant] } }
         - name: phase
           in: query
@@ -3037,14 +3205,136 @@ paths:
         '422': { $ref: '#/components/responses/ValidationFailed' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
+  # ─────────────────────────────────────────────────────────────────────
+  # SELLING (own-bots)
+  #
+  # The sub-user hands CS2 items to a SkinShark-operated Steam bot and is paid
+  # out from house treasury at a locked quote. Flow: price → submit (exact-cent
+  # lock) → the user ACCEPTS the bot's Steam offer → hold → payout. Sells only
+  # ever target the user's own saved Steam trade URL.
+  # ─────────────────────────────────────────────────────────────────────
+  /market/sell/prices:
+    get:
+      operationId: getSellPrices
+      tags: [Market]
+      summary: Sell prices — the payout book
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required.
+
+        The payout book — what we pay per item, in USD. Use it to price a sale
+        without reading the user's inventory. `search` filters by market hash name.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: search, in: query, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 5000 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SellPricesResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /market/sell/inventory:
+    get:
+      operationId: getSellInventory
+      tags: [Market]
+      summary: Sell inventory — the user's items priced for selling
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required.
+
+        The user's CS2 inventory (appid 730), each item priced for selling. `price`
+        is our USD offer; `accepted` is true only when a quote exists AND the item is
+        tradable — only accepted items can be sold. Send each item's `id` + exact
+        `price` to `POST /market/sell`. Pass `refresh=true` to bypass the inventory
+        cache. Requires a linked Steam account (`STEAM_ACCOUNT_REQUIRED` otherwise).
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: tradeUrl, in: query, schema: { type: string, format: uri }, description: Optional; must belong to the user's linked Steam account. }
+        - { name: refresh, in: query, schema: { type: boolean }, description: Force a fresh inventory read instead of the cache. }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SellInventoryResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /market/sell:
+    post:
+      operationId: sellMarketItems
+      tags: [Market]
+      summary: Sell items to a SkinShark bot
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: expensive.**
+
+        Sell one or more inventory items to a SkinShark bot. Each `items[]` references
+        an item by `id` (from `/market/sell/inventory`) or raw `assetid` — exactly one —
+        plus the exact `price` you were quoted (cent-exact lock; a stale quote fails with
+        `PRICE_MISMATCH`).
+
+        No money moves at creation. The API picks a bot and sends the user a **receive-only**
+        Steam trade offer; the Trade returns immediately with status `initiated`. The user
+        must **accept the Steam offer**, after which status flows `active → hold → completed`.
+        Payout is a single credit from house treasury, applied at `hold` if the merchant's
+        instant-credit setting is on, otherwise at `completed`. A `reverted` trade is absorbed
+        by SkinShark — never clawed back from the user. Sells always target the user's own
+        saved trade URL. Subscribe to `trade.*` WS events for status updates.
+
+        Common error keys: `STEAM_ACCOUNT_REQUIRED` (1417), `USER_NOT_TRADEABLE` (2101),
+        `INVENTORY_PRIVATE` (2102), `ESCROW_NOT_ALLOWED` (2105), `NO_OFFER_FOUND` (2107),
+        `ITEMS_NOT_ACCEPTED` (2108), `PRICE_MISMATCH` (2020), `DUPLICATE_LISTING_ID` (2023),
+        `NO_BOTS_AVAILABLE` (2100), `PRICING_UNAVAILABLE` (2109), `TRADE_LIMIT_EXCEEDED`.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SellBody' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SellResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
   /market/transactions:
     get:
       operationId: listMarketTransactions
       tags: [Market]
       summary: List the sub-user's trades
-      description: '**Auth context:** sub-user — `On-Behalf-Of` required. Cursor-paginated.'
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. Cursor-paginated.
+
+        Returns the sub-user's trades, **buy and sell**. Filter with `type` (`buy`/`sell`)
+        or `status`.
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/TradeType' } }
         - { name: cursor, in: query, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
         - name: status
@@ -3068,14 +3358,24 @@ paths:
     get:
       operationId: getMarketTransaction
       tags: [Market]
-      summary: Get a single trade
-      description: '**Auth context:** sub-user — `On-Behalf-Of` required.'
+      summary: Get transaction(s) — single or comma-batch
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required.
+
+        Look up a trade by its id or your `externalId`. Pass a single ref to get one `Trade`
+        (404 if it doesn't resolve), or a comma-separated list of up to 100 refs for a batch
+        status poll — that returns an **array** of the trades that resolve (missing refs are
+        omitted, no 404). Comma is the delimiter, so ids containing a comma can't be looked up here.
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
-        - { name: tradeId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - name: tradeId
+          in: path
+          required: true
+          description: One trade id/externalId, or up to 100 comma-separated refs (each ≤ 128 chars).
+          schema: { type: string, minLength: 1 }
       responses:
         '200':
-          description: OK.
+          description: A single `Trade` for one ref, or an array of `Trade` for a comma-separated list.
           content:
             application/json:
               schema:
@@ -3083,7 +3383,11 @@ paths:
                   - $ref: '#/components/schemas/Envelope'
                   - type: object
                     properties:
-                      data: { $ref: '#/components/schemas/Trade' }
+                      data:
+                        oneOf:
+                          - $ref: '#/components/schemas/Trade'
+                          - type: array
+                            items: { $ref: '#/components/schemas/Trade' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }

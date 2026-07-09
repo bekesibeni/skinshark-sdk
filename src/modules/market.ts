@@ -7,10 +7,16 @@ import type {
   SearchQuery, ListListingsQuery, ListMarketTradesQuery,
   MarketPricesQuery, MarketPricesResponse,
   MarketLiveQuery,
+  SellItem, SellBody, SellResponse, SellInventory, SellInventoryQuery,
+  SellPricesQuery, SellPricesResponse,
 } from '../types/api.js';
 import type { ListingId, ItemId, TradeRef } from '../types/branded.js';
 
 export interface BuyOptions extends RequestOptions {
+  tradeUrl?: string;
+}
+
+export interface SellOptions extends RequestOptions {
   tradeUrl?: string;
 }
 
@@ -22,8 +28,15 @@ export class MarketTradesModule {
     return this.http.request<TransactionListResponse>('GET', 'market/transactions', { query, opts });
   }
 
-  get(tradeId: TradeRef, opts?: RequestOptions): Promise<Trade> {
-    return this.http.request<Trade>('GET', `market/transactions/${encodeURIComponent(tradeId)}`, { opts });
+  /** Resolve the actor's trades by UUID or your externalId — always an array (pass a single id as
+   *  `[id]`, up to 100). Unresolved refs are simply absent from the result, so a reconciliation
+   *  poller gets whatever exists. */
+  get(ids: TradeRef[], opts?: RequestOptions): Promise<Trade[]> {
+    if (ids.length === 0) return Promise.resolve([]);
+    const path = ids.map(encodeURIComponent).join(',');
+    return this.http
+      .request<Trade | Trade[]>('GET', `market/transactions/${path}`, { opts })
+      .then((r) => (Array.isArray(r) ? r : [r]));
   }
 
   /** Best-effort — marketplace must accept the cancel; check response.status. */
@@ -36,11 +49,47 @@ export class MarketTradesModule {
   }
 }
 
+/** Sell inventory items to a SkinShark bot for a house-funded payout. See the Selling guide. */
+export class MarketSellModule {
+  constructor(private readonly http: HttpClient) {}
+
+  /** GET market/sell/prices — the payout book ("what we pay"), keyed by market hash name. */
+  prices(query?: SellPricesQuery, opts?: RequestOptions): Promise<SellPricesResponse> {
+    return this.http.request<SellPricesResponse>('GET', 'market/sell/prices', { query, opts });
+  }
+
+  /** GET market/sell/inventory — the user's CS2 inventory priced for selling. Only `accepted` items can be sold. */
+  inventory(query?: SellInventoryQuery, opts?: RequestOptions): Promise<SellInventory> {
+    return this.http.request<SellInventory>('GET', 'market/sell/inventory', { query, opts });
+  }
+
+  /**
+   * POST /market/sell — sell items to a bot (1–100).
+   *
+   * @param items Each references an item by `id` (from `inventory()`) or `assetid` — exactly one —
+   *   plus the exact quoted `price` (cent-exact lock).
+   * @param externalId Your correlation id, echoed back on the Trade.
+   * @param opts onBehalfOf, tradeUrl override, signal, headers.
+   */
+  create(
+    items: SellItem[],
+    externalId?: string,
+    opts?: SellOptions,
+  ): Promise<SellResponse> {
+    const body: SellBody = { items };
+    if (externalId !== undefined) body.externalId = externalId;
+    if (opts?.tradeUrl !== undefined) body.tradeUrl = opts.tradeUrl;
+    return this.http.request<SellResponse>('POST', 'market/sell', { body, opts });
+  }
+}
+
 export class MarketModule {
   readonly trades: MarketTradesModule;
+  readonly sell: MarketSellModule;
 
   constructor(private readonly http: HttpClient) {
     this.trades = new MarketTradesModule(http);
+    this.sell = new MarketSellModule(http);
   }
 
   /** Type-ahead suggestions for catalog items. */
