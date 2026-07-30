@@ -1414,8 +1414,8 @@ components:
         type: { type: string }
         iconUrl: { type: string, description: Raw Steam icon hash. }
         tradable: { type: boolean }
-        marketPrice: { type: number, description: Platform reference price, USD. Absent when unknown. }
-        price: { type: number, description: What we pay for this item, USD. Send this exact value as the sell price. }
+        marketPrice: { type: number, description: 'Platform reference price, USD. Absent when unknown.' }
+        price: { type: number, description: 'What we pay for this item, USD. Send this exact value as the sell price.' }
         accepted: { type: boolean, description: True when a payout quote exists AND the item is tradable. Only accepted items can be sold. }
         exterior: { type: string }
         rarity: { type: string }
@@ -1442,7 +1442,7 @@ components:
       required: [marketHashName, deposit, accepted]
       properties:
         marketHashName: { type: string }
-        deposit: { type: number, description: What we pay for this item, USD. }
+        deposit: { type: number, description: 'What we pay for this item, USD.' }
         accepted: { type: boolean, description: Whether the item is currently buyable by our bots. }
 
     SellPricesResponse:
@@ -1493,7 +1493,7 @@ components:
         id: { type: string, format: uuid }
         status: { $ref: '#/components/schemas/TradeStatus' }
         itemCount: { type: integer }
-        totalPrice: { type: number, description: Total payout in the wallet currency, at a locked FX rate. }
+        totalPrice: { type: number, description: 'Total payout in the wallet currency, at a locked FX rate.' }
         currency: { $ref: '#/components/schemas/Currency' }
         createdAt: { type: string }
 

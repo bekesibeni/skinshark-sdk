@@ -22,7 +22,7 @@ export type TradeStatus = 'initiated' | 'pending' | 'active' | 'hold' | 'complet
 /** `buy` = purchased from a marketplace; `sell` = sold to a SkinShark bot for a payout. */
 export type TradeType = 'buy' | 'sell';
 /** Stable partner-facing failure code, set on a trade item's `error` when its `status` is `failed`. */
-export type TradeFailureCode = 'LISTING_UNAVAILABLE' | 'PRICE_CHANGED' | 'TRADE_URL_INVALID' | 'STEAM_ACCOUNT_RESTRICTED' | 'MARKET_UNAVAILABLE' | 'PURCHASE_FAILED';
+export type TradeFailureCode = 'LISTING_UNAVAILABLE' | 'NO_LISTING_AT_PRICE' | 'PRICE_CHANGED' | 'TRADE_URL_INVALID' | 'STEAM_ACCOUNT_RESTRICTED' | 'BUYER_TRADE_RESTRICTED' | 'MARKET_UNAVAILABLE' | 'PURCHASE_FAILED';
 export type DepositStatus = 'initiated' | 'pending' | 'completed' | 'partial' | 'expired' | 'cancelled' | 'refunded' | 'failed';
 export type DepositMethod = 'gatepay' | 'onramp' | 'crypto';
 export type DepositCurrency = 'USDT' | 'USDC' | 'DAI' | 'BTC' | 'ETH' | 'SOL';
