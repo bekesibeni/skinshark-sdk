@@ -603,6 +603,8 @@ export interface BuyItem {
   listingRawId?: string;
   /** Decimal max acceptable unit price, e.g. "5.50". */
   maxPrice: string;
+  /** Your own ref for this item. Unique per request; addressable on cancel. */
+  externalId?: string;
 }
 
 export interface BuyBody {
@@ -629,6 +631,8 @@ export interface QuickBuyBody {
   phase?: DopplerPhase;
   tradeUrl?: string;
   externalId?: string;
+  /** One ref per requested unit, applied in order. Must be exactly `amount` entries. */
+  externalIds?: string[];
 }
 
 export interface QuickBuyResponse {
@@ -641,8 +645,10 @@ export interface QuickBuyResponse {
 }
 
 export interface TradeItem {
-  /** Listing id — the same id returned by listing endpoints. Use this id when calling the cancel endpoint. */
-  id: ListingId;
+  /** Stable per-item handle. Pass this — or your own `externalId` — when cancelling. */
+  id: string;
+  /** Your own per-item ref, when you supplied one at buy time. Also accepted by cancel. */
+  externalId?: string;
   name: string | null;
   marketHashName: string | null;
   type: string | null;
@@ -708,8 +714,24 @@ export interface MerchantTradeListResponse {
 }
 
 export interface CancelItemResponse {
-  itemId: ListingId;
+  itemId: string;
   status: 'cancelled' | 'failed';
+}
+
+export interface CancelTradeItemOutcome {
+  itemId: string;
+  externalId?: string;
+  status: 'cancelled' | 'failed';
+  /** Stable error key when the cancel was refused. */
+  reason?: string;
+}
+
+export interface CancelTradeResponse {
+  tradeId: TradeId;
+  requested: number;
+  cancelled: number;
+  failed: number;
+  items: CancelTradeItemOutcome[];
 }
 
 // ── Sell (own-bots) ──────────────────────────────────────────────────

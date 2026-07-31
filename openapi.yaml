@@ -1184,6 +1184,13 @@ components:
           type: string
           pattern: '^\d+(\.\d{1,2})?$'
           description: Max acceptable unit price (decimal). Reject if listing price drifted.
+        externalId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: >-
+            Your own reference for this item. Must be distinct within the request; echoed back on
+            `TradeItem.externalId` and accepted as the `itemId` when cancelling.
 
     BuyBody:
       type: object
@@ -1241,6 +1248,14 @@ components:
           description: Doppler phase to buy. EcoSteam only — the order is routed exclusively to EcoSteam and priced against the phase floor. Cannot be combined with instant delivery.
         tradeUrl: { type: string, format: uri }
         externalId: { type: string, maxLength: 128 }
+        externalIds:
+          type: array
+          maxItems: 200
+          items: { type: string, minLength: 1, maxLength: 128 }
+          description: >-
+            Your own reference for each requested unit, applied in order. Must contain exactly
+            `amount` entries, all distinct. Fills arrive over time and in no fixed order, so this
+            is what lets you tell your units apart afterwards and cancel a specific one.
 
     QuickBuyResponse:
       type: object
@@ -1259,7 +1274,15 @@ components:
       type: object
       required: [id, name, marketHashName, type, iconUrl, price]
       properties:
-        id: { type: string }
+        id:
+          type: string
+          description: >-
+            Stable handle for this item, for its whole life. Pass it as `itemId` when cancelling.
+        externalId:
+          type: string
+          description: >-
+            Your own reference for this item, echoed back when you supplied one at buy time.
+            Also accepted as `itemId` when cancelling.
         name: { type: [string, "null"] }
         marketHashName: { type: [string, "null"] }
         type: { type: [string, "null"] }
@@ -1366,11 +1389,33 @@ components:
 
     CancelItemResponse:
       type: object
-      required: [ok, itemId, status]
+      required: [itemId, status]
       properties:
-        ok: { type: boolean, enum: [true] }
-        itemId: { type: string, format: uuid }
+        itemId: { type: string }
         status: { type: string, enum: [cancelled, failed] }
+
+    CancelTradeResponse:
+      type: object
+      required: [tradeId, requested, cancelled, failed, items]
+      properties:
+        tradeId: { type: string }
+        requested:
+          type: integer
+          description: Items that were still cancellable and therefore attempted.
+        cancelled: { type: integer }
+        failed: { type: integer }
+        items:
+          type: array
+          items:
+            type: object
+            required: [itemId, status]
+            properties:
+              itemId: { type: string }
+              externalId: { type: string }
+              status: { type: string, enum: [cancelled, failed] }
+              reason:
+                type: string
+                description: Stable error key when the cancel was refused, e.g. `TRADE_CANCEL_TOO_SOON`.
 
     # ─────────────────────────────────────────────────────────────────────
     # Sell (own-bots)
@@ -3400,12 +3445,21 @@ paths:
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
 
-        Best-effort — marketplace must still accept the cancellation. The
+        Best-effort — the supplier must still accept the cancellation. The
         response `status` field reflects whether the cancel succeeded.
+
+        `tradeId` is the trade id or your `externalId`. `itemId` is `TradeItem.id` or your own
+        per-item `externalId`.
+
+        An item can only be cancelled while it is `initiated` or `pending`, once the order has
+        been placed upstream, and no earlier than 30 minutes after it was created — before that
+        you get `TRADE_CANCEL_TOO_SOON` (2041) carrying `cancellableAt`. Items already delivered
+        or in flight to Steam, and items on supplier lanes that do not support cancellation,
+        return `TRADE_NOT_CANCELLABLE` (2040).
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
         - { name: tradeId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
-        - { name: itemId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: itemId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
       responses:
         '200':
           description: OK.
@@ -3417,6 +3471,40 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: '#/components/schemas/CancelItemResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /market/transactions/{tradeId}/cancel:
+    post:
+      operationId: cancelMarketTransaction
+      tags: [Market]
+      summary: Cancel every still-cancellable item on a Trade
+      description: |
+        **Auth context:** sub-user — `On-Behalf-Of` required. **Rate limit: 50/min.**
+
+        Cancels every still-cancellable item in the trade. `tradeId` is the trade id or your
+        `externalId`.
+
+        Best-effort, and never all-or-nothing: items the supplier refuses are reported in
+        `items[]` with a `reason`, and the request still returns `200`. Items already past the
+        cancellable window are not attempted at all, so `requested` counts only the candidates.
+        The same preconditions as the per-item cancel apply to each item.
+      parameters:
+        - { $ref: '#/components/parameters/OnBehalfOf' }
+        - { name: tradeId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CancelTradeResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }

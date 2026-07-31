@@ -106,7 +106,7 @@ sdk
 │   ├── buy(items, externalId?, opts?)
 │   ├── quickBuy(body, externalId?, opts?)
 │   ├── sell.{prices,inventory,create(items, externalId?, opts?)}  sell to a SkinShark bot
-│   └── trades.{list,get,cancelItem}                            actor's own trades
+│   └── trades.{list,get,cancelItem,cancel}                     actor's own trades
 ├── as(ref) → ScopedClient                                      sub-user-bound view
 ├── health()                                                    auth/connectivity check
 ├── newIdempotencyKey()                                         UUIDv4 generator
@@ -385,8 +385,33 @@ trade status rolls them up):
 
 On a `failed` item, `error` is one of `LISTING_UNAVAILABLE`, `PRICE_CHANGED`,
 `TRADE_URL_INVALID`, `STEAM_ACCOUNT_RESTRICTED`, `MARKET_UNAVAILABLE`,
-`PURCHASE_FAILED`. The optional `errorDetail` carries the raw marketplace reason
-for debugging — treat it as opaque, don't branch on it.
+`PURCHASE_FAILED`, `NO_LISTING_AT_PRICE`, `BUYER_TRADE_RESTRICTED`. The optional
+`errorDetail` carries the raw marketplace reason for debugging — treat it as
+opaque, don't branch on it.
+
+## Cancelling
+
+```ts
+await sk.market.trades.cancelItem(tradeRef, itemRef);  // one item
+await sk.market.trades.cancel(tradeRef);               // every cancellable item
+```
+
+`tradeRef` is the trade id or your `externalId`. `itemRef` is `TradeItem.id` or the per-item
+`externalId` you supplied at buy time:
+
+```ts
+await sk.market.buy([{ listingId, maxPrice: '12.50', externalId: 'my-item-1' }]);
+await sk.market.quickBuy({ itemId, maxPrice: '12.50', amount: 3, delivery: 'standard',
+                           externalIds: ['unit-a', 'unit-b', 'unit-c'] });
+```
+
+For quick buys this is the only way to tell your units apart: fills arrive over time and in no
+fixed order, and a quick-buy item never has a listing id of its own.
+
+An item is cancellable only while `initiated` or `pending`, once the order reached the supplier,
+and no earlier than **30 minutes** after creation — before that you get `TRADE_CANCEL_TOO_SOON`
+(2041) with `cancellableAt`. Anything else is `TRADE_NOT_CANCELLABLE` (2040). Both calls are
+best-effort; `cancel()` returns per-item outcomes and still resolves `200` when some are refused.
 
 ## Enum casing
 

@@ -3,7 +3,7 @@ import type {
   SuggestionsResponse, SearchResponse, ItemDetailResponse,
   ListingsResponse, MarketListing,
   BuyItem, BuyResponse, QuickBuyBody, QuickBuyResponse,
-  TransactionListResponse, Trade, CancelItemResponse,
+  TransactionListResponse, Trade, CancelItemResponse, CancelTradeResponse,
   SearchQuery, ListListingsQuery, ListMarketTradesQuery,
   MarketPricesQuery, MarketPricesResponse,
   MarketLiveQuery,
@@ -39,11 +39,21 @@ export class MarketTradesModule {
       .then((r) => (Array.isArray(r) ? r : [r]));
   }
 
-  /** Best-effort — marketplace must accept the cancel; check response.status. */
+  /** Best-effort — marketplace must accept the cancel; check response.status.
+   *  `itemId` is `TradeItem.id` or your own per-item `externalId`. */
   cancelItem(tradeId: TradeRef, itemId: string, opts?: RequestOptions): Promise<CancelItemResponse> {
     return this.http.request<CancelItemResponse>(
       'POST',
       `market/transactions/${encodeURIComponent(tradeId)}/items/${encodeURIComponent(itemId)}/cancel`,
+      { opts },
+    );
+  }
+
+  /** Cancel every still-cancellable item in a trade. Per-item outcomes come back in `items`. */
+  cancel(tradeId: TradeRef, opts?: RequestOptions): Promise<CancelTradeResponse> {
+    return this.http.request<CancelTradeResponse>(
+      'POST',
+      `market/transactions/${encodeURIComponent(tradeId)}/cancel`,
       { opts },
     );
   }
