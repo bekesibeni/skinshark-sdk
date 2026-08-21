@@ -4,7 +4,9 @@ import got, {
   TimeoutError,
   type Got,
   type Method,
-  type OptionsOfJSONResponseBody,
+  type OptionsOfTextResponseBody,
+  type OptionsOfUnknownResponseBody,
+  type Response,
 } from 'got';
 import { SkinsharkError } from '../errors.js';
 import { META_SYMBOL, type ResponseMeta } from '../meta.js';
@@ -46,6 +48,22 @@ interface CallContext extends Record<string, unknown> {
 }
 
 export type QueryParams = Record<string, string | number | boolean | undefined> | object;
+
+export interface RawFetchInit {
+  query?: QueryParams | undefined;
+  body?: unknown;
+  /** Defaults to 'text'. */
+  responseType?: 'text' | 'buffer' | undefined;
+  /** Statuses returned rather than thrown — `[304]` for a conditional GET. */
+  acceptStatus?: readonly number[] | undefined;
+  opts?: RequestOptions | undefined;
+}
+
+export interface RawResponse<B extends string | Buffer = string> {
+  status: number;
+  headers: Record<string, string>;
+  body: B;
+}
 
 export interface InternalRequestInit {
   query?: QueryParams | undefined;
@@ -107,6 +125,15 @@ function buildSearchParams(query: QueryParams | undefined): Record<string, strin
   return out;
 }
 
+function flattenHeaders(raw: Record<string, string | string[] | undefined>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k in raw) {
+    const v = raw[k];
+    out[k] = Array.isArray(v) ? v.join(', ') : String(v ?? '');
+  }
+  return out;
+}
+
 function makeResponseMeta(
   requestId: string,
   status: number,
@@ -118,11 +145,7 @@ function makeResponseMeta(
     // Headers are computed on first access and cached. Most consumers never
     // read them, so the eager Object.fromEntries was wasted work.
     get headers(): Record<string, string> {
-      const out: Record<string, string> = {};
-      for (const k in rawHeaders) {
-        const v = rawHeaders[k];
-        out[k] = Array.isArray(v) ? v.join(', ') : String(v ?? '');
-      }
+      const out = flattenHeaders(rawHeaders);
       Object.defineProperty(this, 'headers', { value: out, writable: false, configurable: false });
       return out;
     },
@@ -195,7 +218,8 @@ export class HttpClient {
             options.context = ctx;
             options.headers['api-key'] = apiKey;
             options.headers['user-agent'] = ua;
-            options.headers['accept'] = 'application/json';
+            // Raw fetches declare their own Accept; typed calls never set one.
+            options.headers['accept'] ??= 'application/json';
             if (ctx.onBehalfOf) options.headers['On-Behalf-Of'] = ctx.onBehalfOf;
             if (ctx.idempotencyKey) options.headers['Idempotency-Key'] = ctx.idempotencyKey;
             if (debug) {
@@ -257,22 +281,19 @@ export class HttpClient {
     return proxy;
   }
 
-  async request<T>(
-    method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
-    path: string,
-    init: InternalRequestInit = {},
-  ): Promise<T> {
-    const mergedOpts: RequestOptions = { ...this.defaults, ...(init.opts ?? {}) };
-
+  private buildOptions(
+    method: Method,
+    mergedOpts: RequestOptions,
+    init: { query?: QueryParams | undefined; body?: unknown },
+  ): OptionsOfUnknownResponseBody {
+    const searchParams = buildSearchParams(init.query);
     const ctx: CallContext = {
       onBehalfOf: mergedOpts.onBehalfOf,
       idempotencyKey: mergedOpts.idempotencyKey,
       debug: this.debug,
     };
 
-    const searchParams = buildSearchParams(init.query);
-
-    const requestOptions: OptionsOfJSONResponseBody = {
+    const options: OptionsOfUnknownResponseBody = {
       method,
       context: ctx,
       ...(searchParams ? { searchParams } : {}),
@@ -283,17 +304,62 @@ export class HttpClient {
     };
 
     if (mergedOpts.retries === false) {
-      requestOptions.retry = { limit: 0 };
+      options.retry = { limit: 0 };
     } else if (mergedOpts.retries) {
-      requestOptions.retry = {
+      options.retry = {
         limit: mergedOpts.retries.max ?? 3,
         ...(mergedOpts.idempotencyKey ? { methods: KEYED_RETRY_METHODS } : {}),
       };
     } else if (mergedOpts.idempotencyKey) {
       // Default retry config is in effect. Expand methods to include POST/PATCH
       // since the idempotency key makes a retry safe.
-      requestOptions.retry = { methods: KEYED_RETRY_METHODS };
+      options.retry = { methods: KEYED_RETRY_METHODS };
     }
+    return options;
+  }
+
+  /**
+   * The envelope-free path: status, headers and the body as sent, for routes that never emit
+   * `{ success, data }` — artifact exports, NDJSON, anything that hijacks the reply. A 3xx is a
+   * result rather than a failure here, so a conditional GET can act on its own 304.
+   */
+  async fetchRaw<B extends string | Buffer = string>(
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
+    path: string,
+    init: RawFetchInit = {},
+  ): Promise<RawResponse<B>> {
+    const mergedOpts: RequestOptions = { ...this.defaults, ...(init.opts ?? {}) };
+    // StrictOptions omits responseType on purpose - got only surfaces it through the per-shape
+    // option types, and this is the one call that picks a shape other than JSON.
+    const requestOptions = {
+      ...this.buildOptions(method, mergedOpts, init),
+      responseType: init.responseType ?? 'text',
+    } as OptionsOfTextResponseBody;
+
+    let response: Response<unknown>;
+    try {
+      response = (await this.client(path.replace(/^\/+/, ''), requestOptions)) as Response<unknown>;
+    } catch (e) {
+      if (e instanceof HTTPError && init.acceptStatus?.includes(e.response.statusCode)) {
+        response = e.response;
+      } else {
+        throw mapError(e, method, path, this.debug);
+      }
+    }
+
+    return {
+      status: response.statusCode,
+      headers: flattenHeaders(response.headers),
+      body: response.body as B,
+    };
+  }
+
+  async request<T>(
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
+    path: string,
+    init: InternalRequestInit = {},
+  ): Promise<T> {
+    const requestOptions = this.buildOptions(method, { ...this.defaults, ...(init.opts ?? {}) }, init);
 
     try {
       // Strip leading slash since got's prefixUrl expects relative paths.
@@ -322,6 +388,18 @@ export class HttpClient {
   }
 }
 
+// A raw fetch reads the body as text or bytes, so an error envelope arrives unparsed - the key
+// and code are still in there, and they are what callers branch on.
+function envelopeOf(body: unknown): Envelope<unknown> | undefined {
+  const text = typeof body === "string" ? body : Buffer.isBuffer(body) ? body.toString("utf8") : null;
+  if (text === null) return body as Envelope<unknown> | undefined;
+  try {
+    return JSON.parse(text) as Envelope<unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
 function mapError(
   e: unknown,
   method: string,
@@ -340,7 +418,7 @@ function mapError(
   }
 
   if (e instanceof HTTPError) {
-    const body = e.response.body as Envelope<unknown> | undefined;
+    const body = envelopeOf(e.response.body);
     const status = e.response.statusCode;
     const errInfo = body?.error;
     const requestId = body?.requestId;

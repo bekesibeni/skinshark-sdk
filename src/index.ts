@@ -9,9 +9,15 @@ export { ScopedClient } from './modules/scoped.js';
 export type { BuyOptions, SellOptions } from './modules/market.js';
 
 export { RawModule } from './modules/raw.js';
-export type { RawMethod, RawRequestInit } from './modules/raw.js';
+export type { RawMethod, RawRequestInit, RawFetchRequestInit } from './modules/raw.js';
 
-export type { DebugEvent, DebugHook, QueryParams } from './internal/http.js';
+export type {
+  DebugEvent,
+  DebugHook,
+  QueryParams,
+  RawFetchInit,
+  RawResponse,
+} from './internal/http.js';
 
 export {
   SkinsharkError,

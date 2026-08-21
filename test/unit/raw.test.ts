@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { gzipSync } from 'node:zlib';
 import nock from 'nock';
 import { Skinshark, isError, meta } from '../../src/index.js';
 
@@ -118,5 +119,68 @@ describe('sdk.raw — untyped endpoints', () => {
 
     const sdk = new Skinshark({ apiKey: API_KEY });
     await expect(sdk.request({ method: 'POST', path: '/internal/legacy' })).resolves.toEqual({ ok: true });
+  });
+});
+
+describe('sdk.raw.fetch — envelope-free routes', () => {
+  // Export lanes hijack the reply and write NDJSON, so there is no envelope to unwrap and
+  // JSON.parse dies on line 2. Reading them at all depends on this path staying envelope-free.
+  it('returns a gzipped NDJSON body undecoded, with headers', async () => {
+    const body = [
+      JSON.stringify({ lane: 'eco-topbook', version: 7 }),
+      JSON.stringify({ id: 'a', price: 1.5 }),
+      '',
+    ].join('\n');
+
+    nock(BASE, { reqheaders: { 'api-key': API_KEY, accept: 'application/x-ndjson' } })
+      .get('/market/exports/eco-topbook')
+      .reply(200, gzipSync(Buffer.from(body)), {
+        'content-type': 'application/x-ndjson',
+        'content-encoding': 'gzip',
+        etag: '"eco-topbook-7"',
+      });
+
+    const sdk = new Skinshark({ apiKey: API_KEY });
+    const res = await sdk.raw.fetch({
+      path: '/market/exports/eco-topbook',
+      opts: { headers: { accept: 'application/x-ndjson' } },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.etag).toBe('"eco-topbook-7"');
+    expect(res.body.trimEnd().split('\n')).toHaveLength(2);
+  });
+
+  // A conditional poll's whole point is the 304. Throwing on it would make ETag caching
+  // indistinguishable from a failed pull.
+  it('returns a 304 rather than throwing', async () => {
+    nock(BASE, { reqheaders: { 'if-none-match': '"eco-topbook-7"' } })
+      .get('/market/exports/eco-topbook')
+      .reply(304, '', { 'x-export-next-update': '2026-08-21T21:00:00Z' });
+
+    const sdk = new Skinshark({ apiKey: API_KEY });
+    const res = await sdk.raw.fetch({
+      path: '/market/exports/eco-topbook',
+      opts: { headers: { 'if-none-match': '"eco-topbook-7"' } },
+    });
+
+    expect(res.status).toBe(304);
+    expect(res.headers['x-export-next-update']).toBe('2026-08-21T21:00:00Z');
+  });
+
+  it('still maps HTTP failures to SkinsharkError unless accepted', async () => {
+    nock(BASE).get('/market/exports/eco-topbook').twice()
+      .reply(403, { requestId: 'r', success: false, error: { code: 1002, key: 'FORBIDDEN', message: 'no' } });
+
+    const sdk = new Skinshark({ apiKey: API_KEY, retries: false });
+    await expect(sdk.raw.fetch({ path: '/market/exports/eco-topbook' })).rejects.toSatisfy(
+      (e: unknown) => isError(e, 'FORBIDDEN'),
+    );
+
+    const accepted = await sdk.raw.fetch({
+      path: '/market/exports/eco-topbook',
+      acceptStatus: [403],
+    });
+    expect(accepted.status).toBe(403);
   });
 });

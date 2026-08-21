@@ -57,6 +57,13 @@ Retry policy: 408/429/5xx, exponential + jitter, `Retry-After` honored. `calcula
 
 `mapError` converts got's `HTTPError` / `RequestError` / `TimeoutError` into a single `SkinsharkError` with the right `key` from the envelope when present. Network-level failures get SDK-side keys (`SDK_TIMEOUT`, `SDK_NETWORK`, `SDK_ABORTED`).
 
+`HttpClient.fetchRaw` is the second exit, behind `sdk.raw.fetch`. It shares `buildOptions` with
+`request` — same auth, context, retries and error mapping — and differs only in what it does with
+the response: no envelope unwrap, no `meta()`, status and headers returned to the caller. It exists
+because export lanes hijack the reply and write gzipped NDJSON, which has no envelope and is not one
+JSON document. It also has to treat `304` as an answer, since those lanes are polled on an ETag.
+The `beforeRequest` hook sets `accept` with `??=` for this reason — a raw fetch declares its own.
+
 ### Envelope + meta
 
 Every successful response unwraps to `data` directly. The envelope's `requestId` and HTTP details are attached via a `Symbol.for('@skinshark/sdk.meta')` non-enumerable property on the data — read with the `meta()` helper. This keeps the ergonomic path clean (consumers get the data they want) while preserving observability for support/debugging. See `src/meta.ts`.

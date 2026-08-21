@@ -108,6 +108,7 @@ sdk
 │   ├── sell.{prices,inventory,create(items, externalId?, opts?)}  sell to a SkinShark bot
 │   └── trades.{list,get,cancelItem,cancel}                     actor's own trades
 ├── raw.{get,post,put,patch,delete,request}                     untyped escape hatch
+├── raw.fetch({ path, opts, responseType?, acceptStatus? })     envelope-free (NDJSON, 304)
 ├── as(ref) → ScopedClient                                      sub-user-bound view
 ├── health()                                                    auth/connectivity check
 ├── newIdempotencyKey()                                         UUIDv4 generator
@@ -565,6 +566,41 @@ await user.raw.post('/internal/whatever', { name: 'x' }); // sends On-Behalf-Of
 `put`, `patch` and `delete` are there too. `raw.request({ method, path, query, body, opts })`
 is the only form that takes a query string and a body together; `sdk.request(...)`
 is an alias for it.
+
+### Envelope-free routes
+
+Not every route returns `{ success, data }` — an artifact export writes NDJSON straight to the
+socket, with no envelope to unwrap and nothing `JSON.parse` can read whole. `raw.fetch` is the
+path for those: it hands back the status, the headers and the body exactly as sent.
+
+```ts
+const res = await sdk.raw.fetch({
+  path: '/some/export',
+  opts: { headers: { accept: 'application/x-ndjson' } },
+});
+
+res.status;          // 200
+res.headers.etag;    // '"lane-7"'
+res.body;            // string — one JSON document per line
+```
+
+Gzip is transparent as always; `body` is already decompressed. Pass
+`responseType: 'buffer'` for a binary artifact.
+
+A conditional GET's `304` comes back as a result rather than an error, so an ETag poll can act
+on it:
+
+```ts
+const res = await sdk.raw.fetch({
+  path: '/some/export',
+  opts: { headers: { 'if-none-match': etag } },
+});
+if (res.status === 304) return; // unchanged
+```
+
+`4xx`/`5xx` still map to `SkinsharkError` with the envelope's key intact. `acceptStatus`
+widens what comes back as a result instead — `acceptStatus: [404]` to handle a missing artifact
+yourself.
 
 ## License
 
