@@ -84,6 +84,12 @@ Method signature recipe (in this order):
 
 `RequestOptions` is the universal cross-cutting bag: `onBehalfOf`, `idempotencyKey`, `signal`, `timeoutMs`, `retries`, `headers`. For endpoints with optional body fields like `tradeUrl`, the per-endpoint `BuyOptions` extends `RequestOptions` so consumers don't deal with two bags.
 
+### The `raw` escape hatch (`src/modules/raw.ts`)
+
+`RawModule` is a module like any other, but path-driven and untyped (`T = unknown`) — `get`/`post`/`put`/`patch`/`delete` plus `request({ method, path, query, body, opts })` for the query-and-body case. It exists so a consumer calling an endpoint we haven't wrapped (internal routes, anything newer than the last release) still gets auth, `On-Behalf-Of`, `Idempotency-Key`, retries, envelope unwrap, `SkinsharkError` and `meta()` instead of dropping to `fetch`.
+
+Because it's a normal module taking an `HttpClient`, `ScopedClient` constructs it against the bound client and `scoped.raw.*` sends `On-Behalf-Of` for free. `Skinshark.request()` is kept as an alias for `raw.request()`. Don't grow `RawModule` with endpoint knowledge — when a path stabilizes, it graduates to a typed module method.
+
 ### `sdk.as(ref)` and `ScopedClient`
 
 `buildScoped(http, ref)` in `src/modules/scoped.ts` calls `GET /merchant/users/{ref}` (UUID or externalId both work) and constructs a `ScopedClient` with the snapshot fields cached (id, externalId, email, steamId, currency, balance, status, feeBps, createdAt) plus the actor-context modules.

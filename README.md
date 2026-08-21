@@ -107,11 +107,12 @@ sdk
 │   ├── quickBuy(body, externalId?, opts?)
 │   ├── sell.{prices,inventory,create(items, externalId?, opts?)}  sell to a SkinShark bot
 │   └── trades.{list,get,cancelItem,cancel}                     actor's own trades
+├── raw.{get,post,put,patch,delete,request}                     untyped escape hatch
 ├── as(ref) → ScopedClient                                      sub-user-bound view
 ├── health()                                                    auth/connectivity check
 ├── newIdempotencyKey()                                         UUIDv4 generator
 ├── verifyWebhook(rawBody, headers, opts?)                      uses ctor webhookSecret
-└── request<T>({ method, path, query, body, opts })             escape hatch
+└── request<T>({ method, path, query, body, opts })             alias for raw.request
 
 verifyWebhook(rawBody, headers, { secret, toleranceSeconds? })  standalone (no client)
 isError(e, key) / isAuthError / isRateLimited / isValidationError
@@ -190,14 +191,20 @@ const all = await sdk.market.prices({ limit: -1 });
 ## Live market
 
 ```ts
-// Curated live-market snapshot: the cheapest live listings across the
-// admin-watched items, cheapest-first, with the sub-user's fee applied.
-// Each item's `id` is buyable via `market.buy`. Defaults return the whole
-// feed; page through it with page/limit.
-const feed = await sdk.market.live({ limit: 100 });
-for (const l of feed.items) {
-  console.log(l.id, l.marketHashName, l.price);
+// Live-market browse page: top-of-book blocks, most-liquid then priciest,
+// with the sub-user's fee applied. Each block's `id` is buyable via
+// `market.buy`. Page through it — `limit` is 1–100.
+const feed = await sdk.market.live({ page: 1, limit: 100 });
+for (const block of feed.items) {
+  // No flat `price`: a block is priced per source that carries it (in
+  // practice one, since a listing id encodes its marketplace).
+  for (const [marketplace, p] of Object.entries(block.prices)) {
+    console.log(block.id, block.marketHashName, marketplace, p.price, p.updatedAt);
+  }
 }
+
+// Lane health, so an empty page reads as "frozen source" not "nothing listed".
+console.log(feed.sources); // { c5game: { fresh: true, lastProjectedAt: 1756... } }
 ```
 
 For a live push stream of the same feed (plus the full C5 firehose), open the
@@ -525,18 +532,39 @@ import type { Trade, MarketListing, BuyBody, ErrorKey } from '@skinshark/sdk/typ
 
 ## Escape hatch
 
-If we haven't wrapped an endpoint yet, you can call it through the same auth +
-retry + envelope-unwrap pipeline:
+`sdk.raw` calls any endpoint by path — including ones this SDK doesn't wrap yet —
+through the same pipeline as every typed method: `api-key`, `On-Behalf-Of`,
+`Idempotency-Key`, retries, envelope unwrap (you get `data`, not the envelope),
+`SkinsharkError` mapping and `meta()`. You never have to drop to `fetch`.
 
 ```ts
-const data = await sdk.request<MyShape>({
-  method: 'POST',
-  path: '/some/new/endpoint',
-  query: { foo: 'bar' },
-  body: { ... },
-  opts: { onBehalfOf: 'u-1' },
-});
+const stats = await sdk.raw.get('/internal/whatever', { since: '2026-08-01' });
+const created = await sdk.raw.post('/internal/whatever', { name: 'x' });
 ```
+
+Return type is `unknown` by default — pass a shape when you have one:
+
+```ts
+interface Coverage { items: number; covered: number }
+
+const coverage = await sdk.raw.get<Coverage>('/internal/coverage');
+const res = await sdk.raw.post<{ id: string }>(
+  '/internal/jobs',
+  { kind: 'reprice' },
+  { idempotencyKey: sdk.newIdempotencyKey(), timeoutMs: 60_000 },
+);
+```
+
+A scoped client exposes the same thing with `On-Behalf-Of` already bound:
+
+```ts
+const user = await sdk.as('customer-42');
+await user.raw.post('/internal/whatever', { name: 'x' }); // sends On-Behalf-Of
+```
+
+`put`, `patch` and `delete` are there too. `raw.request({ method, path, query, body, opts })`
+is the only form that takes a query string and a body together; `sdk.request(...)`
+is an alias for it.
 
 ## License
 

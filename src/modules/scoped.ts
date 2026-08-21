@@ -6,6 +6,7 @@ import { TradeUrlsModule } from './tradeUrls.js';
 import { WalletModule } from './wallet.js';
 import { DepositsModule } from './deposits.js';
 import { MarketModule } from './market.js';
+import { RawModule } from './raw.js';
 
 /**
  * Scoped client returned by `await sdk.as(id)`.
@@ -39,6 +40,9 @@ export class ScopedClient {
   readonly deposits: DepositsModule;
   readonly market: MarketModule;
 
+  /** Untyped escape hatch, with this sub-user's On-Behalf-Of already bound. */
+  readonly raw: RawModule;
+
   constructor(
     private readonly http: HttpClient,
     snapshot: SubUserResponse,
@@ -62,6 +66,7 @@ export class ScopedClient {
     this.wallet = new WalletModule(bound);
     this.deposits = new DepositsModule(bound);
     this.market = new MarketModule(bound);
+    this.raw = new RawModule(bound);
   }
 
   /** Re-fetch the underlying SubUserResponse and update mutable fields. */

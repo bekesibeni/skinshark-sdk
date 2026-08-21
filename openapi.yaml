@@ -1096,18 +1096,26 @@ components:
     # ─────────────────────────────────────────────────────────────────────
     MarketListing:
       type: object
-      required: [id, marketHashName, name, type, iconUrl, price]
+      required: [id, assetId, classId, instanceId, price, referencePrice, name, marketHashName, type, iconUrl, previewToken]
       properties:
         id:
           type: string
           format: uuid
           description: 'Pass to `POST /market/buy` items[].listingId.'
-        marketHashName: { type: string }
+        assetId:
+          type: [string, "null"]
+          description: |
+            Steam asset id of the listed item, or null when the marketplace supplies none.
+            Present on catalog search and listing detail only — it is **not** carried on
+            trade or webhook item payloads.
+        classId: { type: [string, "null"] }
+        instanceId: { type: [string, "null"] }
+        price: { type: number }
+        referencePrice: { type: [number, "null"] }
         name: { type: string }
+        marketHashName: { type: string }
         type: { type: string }
         iconUrl: { type: string }
-        price: { type: number }
-        referencePrice: { type: number }
         exterior: { type: string }
         rarity: { type: string }
         collection: { type: string }
@@ -1151,12 +1159,13 @@ components:
             marketHashName: { type: string }
             pattern: { type: string }
             iconUrl: { type: string }
-        inspectUrl: { type: string }
-        assetId:
-          type: string
-          description: |
-            Steam asset id of the listed item. Present on catalog search and listing
-            detail only — it is **not** carried on trade or webhook item payloads.
+        previewToken:
+          type: [string, "null"]
+          description: >-
+            Bare hex inspect token. Rebuild the in-game link as
+            `steam://run/730//+csgo_econ_action_preview%20{previewToken}`.
+            Null when the marketplace supplied no link and one could not be synthesized.
+            Replaces the removed `inspectUrl` field.
         delivery: { type: string }
 
     ListingsResponse:
@@ -1167,6 +1176,103 @@ components:
           type: array
           items: { $ref: '#/components/schemas/MarketListing' }
         total: { type: integer }
+
+    MarketFeedBlock:
+      type: object
+      description: |
+        Every `MarketListing` property **except** `price` and `referencePrice`,
+        plus `prices` — buy-flow pricing is per source here, not flat.
+      required: [id, assetId, classId, instanceId, name, marketHashName, type, iconUrl, previewToken, prices]
+      properties:
+        id: { type: string, format: uuid, description: 'Pass to `POST /market/buy` items[].listingId.' }
+        assetId: { type: [string, "null"] }
+        classId: { type: [string, "null"] }
+        instanceId: { type: [string, "null"] }
+        name: { type: string }
+        marketHashName: { type: string }
+        type: { type: string }
+        iconUrl: { type: string }
+        exterior: { type: string }
+        rarity: { type: string }
+        collection: { type: string }
+        color: { type: string }
+        wear: { type: [string, "null"] }
+        paintSeed: { type: [number, "null"] }
+        doppler:
+          type: object
+          required: [status, name]
+          properties:
+            status: { type: number }
+            name: { type: string }
+            paintIndex: { type: number }
+        fade:
+          type: object
+          required: [percentage]
+          properties:
+            percentage: { type: number }
+        hardened:
+          type: object
+          required: [status, name]
+          properties:
+            status: { type: number }
+            name: { type: string }
+        stickers:
+          type: array
+          items:
+            type: object
+            required: [name, slot, iconUrl]
+            properties:
+              name: { type: string }
+              marketHashName: { type: string }
+              slot: { type: number }
+              wear: { type: number }
+              iconUrl: { type: string }
+        charm:
+          type: object
+          required: [name, iconUrl]
+          properties:
+            name: { type: string }
+            marketHashName: { type: string }
+            pattern: { type: string }
+            iconUrl: { type: string }
+        previewToken:
+          type: [string, "null"]
+          description: >-
+            Bare hex inspect token. Rebuild the in-game link as
+            `steam://run/730//+csgo_econ_action_preview%20{previewToken}`.
+        delivery: { type: string }
+        prices:
+          type: object
+          description: |
+            Keyed by marketplace id. In practice one entry — a listing id
+            encodes its marketplace.
+          additionalProperties:
+            type: object
+            required: [price, updatedAt]
+            properties:
+              price: { type: string, description: 'Decimal USD, e.g. "5.42".' }
+              updatedAt: { type: string }
+
+    MarketFeedResponse:
+      type: object
+      required: [items, total, page, limit, sources]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/MarketFeedBlock' }
+        total: { type: integer }
+        page: { type: integer }
+        limit: { type: integer }
+        sources:
+          type: object
+          additionalProperties:
+            type: object
+            required: [fresh, lastProjectedAt]
+            properties:
+              fresh:
+                type: boolean
+                description: False when that source's mirror went stale — the lane freezes rather than draining.
+              lastProjectedAt: { type: [number, "null"] }
 
     # ─────────────────────────────────────────────────────────────────────
     # Trades
@@ -3139,23 +3245,26 @@ paths:
     get:
       operationId: getLiveMarket
       tags: [Market]
-      summary: Curated live-market feed (snapshot)
+      summary: Live-market browse page
       description: |
         **Auth context:** sub-user — `On-Behalf-Of` required.
 
-        Full snapshot of the admin-curated live market — the cheapest live
-        listings across the watched items, sorted cheapest-first, with the
-        sub-user's fee already applied. Served fresh from the live cache (no
-        outward caching). Each `items[].id` is a buyable listing id — pass it
-        straight to `/market/buy`.
+        One page of the live market — top-of-book blocks ordered most-liquid
+        first, then priciest, with the sub-user's fee already applied. Served
+        fresh from the live cache (no outward caching). Each `items[].id` is a
+        buyable listing id — pass it straight to `/market/buy`.
+
+        A block carries no flat `price`: it is priced per source under `prices`
+        (in practice one entry, since a listing id encodes its marketplace).
+        `sources` reports per-marketplace lane health, so an empty page reads as
+        "source frozen" rather than "nothing listed".
 
         Subsequent changes stream over
-        `wss://api.skinshark.gg/market/live?scope=watchlist`. Defaults return
-        the whole feed; `page`/`limit` page through it.
+        `wss://api.skinshark.gg/market/live?scope=watchlist`.
       parameters:
         - { $ref: '#/components/parameters/OnBehalfOf' }
         - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
-        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
       responses:
         '200':
           description: OK.
@@ -3166,7 +3275,7 @@ paths:
                   - $ref: '#/components/schemas/Envelope'
                   - type: object
                     properties:
-                      data: { $ref: '#/components/schemas/ListingsResponse' }
+                      data: { $ref: '#/components/schemas/MarketFeedResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/RateLimited' }

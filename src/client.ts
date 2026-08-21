@@ -10,6 +10,7 @@ import { WalletModule } from './modules/wallet.js';
 import { DepositsModule } from './modules/deposits.js';
 import { PayoutsModule } from './modules/payouts.js';
 import { MarketModule } from './modules/market.js';
+import { RawModule, type RawRequestInit } from './modules/raw.js';
 import { buildScoped, type ScopedClient } from './modules/scoped.js';
 import type { Envelope } from './types/api.js';
 import type { WebhookEvent } from './types/webhooks.js';
@@ -33,6 +34,9 @@ export class Skinshark {
   readonly deposits: DepositsModule;
   readonly market: MarketModule;
 
+  /** Untyped get/post/put/patch/delete for endpoints the SDK doesn't wrap yet. */
+  readonly raw: RawModule;
+
   private readonly http: HttpClient;
   private readonly webhookSecret: string | undefined;
 
@@ -48,6 +52,7 @@ export class Skinshark {
     this.wallet = new WalletModule(this.http);
     this.deposits = new DepositsModule(this.http);
     this.market = new MarketModule(this.http);
+    this.raw = new RawModule(this.http);
   }
 
   /**
@@ -101,19 +106,10 @@ export class Skinshark {
   /**
    * Escape hatch for endpoints not yet wrapped, or future API additions.
    * Goes through the same auth + retry + envelope-unwrap pipeline.
+   * `sdk.raw.get(path, query)` / `sdk.raw.post(path, body)` are the short forms.
    */
-  request<T>(init: {
-    method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
-    path: string;
-    query?: Record<string, string | number | boolean | undefined>;
-    body?: unknown;
-    opts?: RequestOptions;
-  }): Promise<T> {
-    return this.http.request<T>(init.method, init.path, {
-      query: init.query,
-      body: init.body,
-      opts: init.opts,
-    });
+  request<T = unknown>(init: RawRequestInit): Promise<T> {
+    return this.raw.request<T>(init);
   }
 }
 

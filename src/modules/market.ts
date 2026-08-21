@@ -6,7 +6,7 @@ import type {
   TransactionListResponse, Trade, CancelItemResponse, CancelTradeResponse,
   SearchQuery, ListListingsQuery, ListMarketTradesQuery,
   MarketPricesQuery, MarketPricesResponse,
-  MarketLiveQuery,
+  MarketLiveQuery, MarketFeedResponse,
   SellItem, SellBody, SellResponse, SellInventory, SellInventoryQuery,
   SellPricesQuery, SellPricesResponse,
 } from '../types/api.js';
@@ -117,9 +117,10 @@ export class MarketModule {
     return this.http.request<MarketPricesResponse>('GET', 'market/prices', { query, opts });
   }
 
-  /** Curated live-market snapshot: cheapest live listings across the watched items, cheapest-first, after fee. `limit: -1` returns the whole feed. */
-  live(query?: MarketLiveQuery, opts?: RequestOptions): Promise<ListingsResponse> {
-    return this.http.request<ListingsResponse>('GET', 'market', { query, opts });
+  /** Live-market browse page: top-of-book blocks ordered most-liquid then priciest, after fee.
+   *  Each block carries `prices` per source instead of a flat `price`; `sources` reports lane health. */
+  live(query?: MarketLiveQuery, opts?: RequestOptions): Promise<MarketFeedResponse> {
+    return this.http.request<MarketFeedResponse>('GET', 'market', { query, opts });
   }
 
   /** Item detail with per-marketplace price + count overview. */

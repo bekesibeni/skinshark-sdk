@@ -560,17 +560,23 @@ export interface ItemDetailResponse {
 // ── Listings ─────────────────────────────────────────────────────────
 export interface MarketListing {
   id: ListingId;
-  marketHashName: string;
+  /** Steam asset id of the listed item; null when the marketplace doesn't supply one. */
+  assetId: string | null;
+  classId: string | null;
+  instanceId: string | null;
+  price: number;
+  /** Steam reference price, USD; null when we have no quote for the item. */
+  referencePrice: number | null;
   name: string;
+  marketHashName: string;
   type: string;
   iconUrl: string;
-  price: number;
-  referencePrice?: number;
   exterior?: string;
   rarity?: string;
   collection?: string;
   color?: string;
-  wear?: number | null;
+  /** Float value as a string. */
+  wear?: string | null;
   paintSeed?: number | null;
   doppler?: { status: number; name: string; paintIndex?: number };
   fade?: { percentage: number };
@@ -583,15 +589,46 @@ export interface MarketListing {
     iconUrl: string;
   }>;
   charm?: { name: string; marketHashName?: string; pattern?: string; iconUrl: string };
-  inspectUrl?: string;
-  /** Steam asset id of the listed item, when the supplier provides it. */
-  assetId?: string;
+  /**
+   * Bare hex inspect token (replaces the old `inspectUrl`). Rebuild the in-game
+   * link as `steam://run/730//+csgo_econ_action_preview%20${previewToken}`.
+   * Null when the marketplace supplied no link and one couldn't be synthesized.
+   */
+  previewToken: string | null;
   delivery?: string;
 }
 
 export interface ListingsResponse {
   items: MarketListing[];
   total: number;
+}
+
+// ── Live market feed (GET /market) ───────────────────────────────────
+export interface MarketFeedPrice {
+  /** Decimal USD as a string, e.g. "5.42". */
+  price: string;
+  updatedAt: string;
+}
+
+/** A listing minus buy-flow pricing, priced per source that carries it. */
+export type MarketFeedBlock = Omit<MarketListing, 'price' | 'referencePrice'> & {
+  /** Keyed by marketplace id. In practice one entry — a listing id encodes its market. */
+  prices: Record<string, MarketFeedPrice>;
+};
+
+export interface MarketFeedSourceHealth {
+  /** False when the source's mirror went stale; the lane freezes rather than draining. */
+  fresh: boolean;
+  lastProjectedAt: number | null;
+}
+
+export interface MarketFeedResponse {
+  items: MarketFeedBlock[];
+  total: number;
+  page: number;
+  limit: number;
+  /** Per-marketplace lane health, so you can tell "no listings" from "source frozen". */
+  sources: Record<string, MarketFeedSourceHealth>;
 }
 
 
@@ -900,7 +937,7 @@ export interface MarketPricesQuery {
 
 export interface MarketLiveQuery {
   page?: number;
-  /** 1–500 per page, or -1 to return the whole feed in one response. */
+  /** 1–100 per page. There is no whole-feed form — page through it. */
   limit?: number;
 }
 
