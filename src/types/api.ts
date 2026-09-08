@@ -495,7 +495,7 @@ export interface SearchResultItem {
   floatRange?: [number, number];
   /**
    * Both prices are fee-applied. `standard` is the overall lowest (manual);
-   * `instant` is the auto-deliver floor (C5 today), null when no instant
+   * `instant` is the auto-deliver floor, null when no instant
    * listing exists. Omitted entirely when the item has no market price.
    */
   price?: { standard: number; instant: number | null };
@@ -514,8 +514,8 @@ export interface SearchResponse {
 export interface MarketPrice {
   itemId: ItemId;
   marketHashName: string;
-  instant: number | null; // C5 auto-deliver floor, after fee
-  standard: number | null; // blended C5 + Eco floor (matches search price), after fee
+  instant: number | null; // auto-deliver floor, after fee
+  standard: number | null; // blended floor across every priced market (matches search price), after fee
   /**
    * Per-Doppler-phase floors, after fee. Present only for phased items. Each phase carries both
    * delivery tiers, folded independently across markets — `instant` is null when no market lists
@@ -668,7 +668,7 @@ export interface QuickBuyBody {
   maxPrice: string;
   amount: number;
   delivery: DeliveryMode;
-  /** Doppler phase to buy. EcoSteam-only: routed exclusively to EcoSteam and priced against the phase floor. Cannot be combined with `delivery: 'instant'`. */
+  /** Doppler phase to buy. Priced against that phase's floor for the requested delivery mode; combines with either. Many phases have no instant listing — check `phases[].instant` on `market.prices()` first. */
   phase?: DopplerPhase;
   tradeUrl?: string;
   externalId?: string;
@@ -708,7 +708,7 @@ export interface TradeItem {
   tradable?: boolean;
   /** Set when `status` is `failed` — one of the stable TradeFailureCode values. */
   error?: TradeFailureCode;
-  /** Raw marketplace reason for debugging (e.g. "c5:ITEM_SOLD item already sold"). Not stable — don't switch on it. */
+  /** Raw marketplace reason for debugging (e.g. "market:ITEM_SOLD item already sold"). Not stable — don't switch on it. */
   errorDetail?: string;
   /** Present only on refunded items (failed/canceled/declined/reverted). `amount + penalty === price`. */
   refund?: ItemRefund;
