@@ -516,8 +516,12 @@ export interface MarketPrice {
   marketHashName: string;
   instant: number | null; // C5 auto-deliver floor, after fee
   standard: number | null; // blended C5 + Eco floor (matches search price), after fee
-  /** Per-Doppler-phase standard prices (EcoSteam only), after fee. Present only for phased items. */
-  phases?: Partial<Record<DopplerPhase, number>>;
+  /**
+   * Per-Doppler-phase floors, after fee. Present only for phased items. Each phase carries both
+   * delivery tiers, folded independently across markets — `instant` is null when no market lists
+   * that phase for instant delivery.
+   */
+  phases?: Partial<Record<DopplerPhase, { standard: number; instant: number | null }>>;
 }
 
 export interface MarketPricesResponse {
