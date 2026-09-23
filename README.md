@@ -344,6 +344,7 @@ app.post('/webhooks/skinshark',
         case 'trade.failed':     /* items[].error — a TradeFailureCode */ break;
         case 'trade.canceled':   /* canceled before delivery — full refund */ break;
         case 'trade.declined':   /* buyer-fault decline — refund minus 2% penalty */ break;
+        case 'item.active':      /* multi-item trades: event.data.item.offerId is this item's offer */ break;
         case 'deposit.completed':/* event.data.deposit */ break;
         // ...
       }

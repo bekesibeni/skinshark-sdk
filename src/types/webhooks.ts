@@ -1,4 +1,4 @@
-import type { Trade } from './api.js';
+import type { Trade, TradeItem, TradeStatus } from './api.js';
 
 export type TradeEventType =
   | 'trade.initiated'
@@ -12,6 +12,22 @@ export type TradeEventType =
   | 'trade.reverted'
   | 'trade.settled'
   | 'trade.refunded';
+
+/**
+ * Per-item transitions, sent on multi-item trades only (a single-item trade's `trade.*` event
+ * already says the same thing). The trade status is a rollup, so an item can move without changing
+ * it; these report every such move. Also re-sent with the same status when an item's `offerId`
+ * changes.
+ */
+export type ItemEventType =
+  | 'item.pending'
+  | 'item.active'
+  | 'item.hold'
+  | 'item.completed'
+  | 'item.failed'
+  | 'item.canceled'
+  | 'item.declined'
+  | 'item.reverted';
 
 export type DepositEventType =
   | 'deposit.initiated'
@@ -32,7 +48,11 @@ export type PayoutCryptoEventType =
   | 'payout.crypto.withdraw.confirmed'
   | 'payout.crypto.withdraw.refunded';
 
-export type WebhookEventType = TradeEventType | DepositEventType | PayoutCryptoEventType;
+export type WebhookEventType =
+  | TradeEventType
+  | ItemEventType
+  | DepositEventType
+  | PayoutCryptoEventType;
 
 export interface SerializedWebhookDeposit {
   id: string;
@@ -90,6 +110,12 @@ export interface TradeEventData {
   refund?: TradeRefundInfo;
 }
 
+export interface ItemEventData {
+  item: TradeItem & { previousStatus: TradeStatus | null };
+  /** The trade without its `items`: patch the item you already hold from `trade.initiated`. */
+  trade: Omit<Trade, 'items'>;
+}
+
 export interface DepositEventData {
   deposit: SerializedWebhookDeposit;
 }
@@ -111,6 +137,7 @@ interface BaseEnvelope<TType extends WebhookEventType, TData> {
 }
 
 export type TradeEvent = BaseEnvelope<TradeEventType, TradeEventData>;
+export type ItemEvent = BaseEnvelope<ItemEventType, ItemEventData>;
 export type DepositEvent = BaseEnvelope<DepositEventType, DepositEventData>;
 export type PayoutCryptoDepositEvent = BaseEnvelope<
   'payout.crypto.deposit.completed',
@@ -123,4 +150,4 @@ export type PayoutCryptoWithdrawalEvent = BaseEnvelope<
 export type PayoutCryptoEvent = PayoutCryptoDepositEvent | PayoutCryptoWithdrawalEvent;
 
 /** Discriminated union of every webhook event delivered to your URL. */
-export type WebhookEvent = TradeEvent | DepositEvent | PayoutCryptoEvent;
+export type WebhookEvent = TradeEvent | ItemEvent | DepositEvent | PayoutCryptoEvent;

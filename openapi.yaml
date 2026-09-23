@@ -1420,6 +1420,11 @@ components:
         delivery: { type: string }
         status: { $ref: '#/components/schemas/TradeStatus' }
         tradable: { type: boolean }
+        offerId:
+          type: string
+          description: >-
+            Steam trade offer carrying this item, once one is sent. Items delivered together share one offer;
+            a multi-item trade can arrive as several. If the offer is re-sent, this is the latest one.
         error:
           type: string
           enum: [LISTING_UNAVAILABLE, PRICE_CHANGED, TRADE_URL_INVALID, STEAM_ACCOUNT_RESTRICTED, MARKET_UNAVAILABLE, PURCHASE_FAILED]
@@ -1450,7 +1455,11 @@ components:
         userId: { type: string }
         steamId: { type: string }
         tradeUrl: { type: string }
-        offerId: { type: string }
+        offerId:
+          type: string
+          description: >-
+            Steam trade offer of a single-item trade. Omitted on multi-item trades, which can span several
+            offers: read `items[].offerId` there.
         externalId: { type: string }
         status: { $ref: '#/components/schemas/TradeStatus' }
         game: { type: string, example: "730" }

@@ -706,6 +706,11 @@ export interface TradeItem {
   delivery?: string;
   status?: TradeStatus;
   tradable?: boolean;
+  /**
+   * Steam trade offer carrying this item, once one is sent. Items delivered together share one
+   * offer; a multi-item trade can arrive as several. If the offer is re-sent, this is the latest.
+   */
+  offerId?: string;
   /** Set when `status` is `failed` — one of the stable TradeFailureCode values. */
   error?: TradeFailureCode;
   /** Raw marketplace reason for debugging (e.g. "market:ITEM_SOLD item already sold"). Not stable — don't switch on it. */
@@ -728,6 +733,7 @@ export interface Trade {
   userId: string;
   steamId: string;
   tradeUrl: string;
+  /** Single-item trades only. A multi-item trade can span several offers: read `items[].offerId`. */
   offerId?: string;
   externalId?: string;
   status: TradeStatus;
