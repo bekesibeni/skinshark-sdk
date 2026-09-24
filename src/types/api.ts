@@ -21,8 +21,8 @@ export type WalletStatus = 'active' | 'suspended' | 'closed';
 export type TradeStatus = 'initiated' | 'pending' | 'active' | 'hold' | 'completed' | 'failed' | 'canceled' | 'declined' | 'reverted';
 /** `buy` = purchased from a marketplace; `sell` = sold to a SkinShark bot for a payout. */
 export type TradeType = 'buy' | 'sell';
-/** Stable partner-facing failure code, set on a trade item's `error` when its `status` is `failed`. */
-export type TradeFailureCode = 'LISTING_UNAVAILABLE' | 'NO_LISTING_AT_PRICE' | 'PRICE_CHANGED' | 'TRADE_URL_INVALID' | 'STEAM_ACCOUNT_RESTRICTED' | 'BUYER_TRADE_RESTRICTED' | 'MARKET_UNAVAILABLE' | 'PURCHASE_FAILED';
+/** Stable partner-facing failure code, set on a trade item's `error` when its `status` is `failed` or `declined`. */
+export type TradeFailureCode = 'LISTING_UNAVAILABLE' | 'NO_LISTING_AT_PRICE' | 'PRICE_CHANGED' | 'TRADE_URL_INVALID' | 'STEAM_ACCOUNT_RESTRICTED' | 'BUYER_TRADE_RESTRICTED' | 'OFFER_NOT_ACCEPTED' | 'MARKET_UNAVAILABLE' | 'PURCHASE_FAILED';
 export type DepositStatus = 'initiated' | 'pending' | 'completed' | 'partial' | 'expired' | 'cancelled' | 'refunded' | 'failed';
 export type DepositMethod = 'gatepay' | 'onramp' | 'crypto';
 export type DepositCurrency = 'USDT' | 'USDC' | 'DAI' | 'BTC' | 'ETH' | 'SOL';
@@ -711,7 +711,7 @@ export interface TradeItem {
    * offer; a multi-item trade can arrive as several. If the offer is re-sent, this is the latest.
    */
   offerId?: string;
-  /** Set when `status` is `failed` — one of the stable TradeFailureCode values. */
+  /** Set when `status` is `failed` or `declined` — one of the stable TradeFailureCode values. */
   error?: TradeFailureCode;
   /** Raw marketplace reason for debugging (e.g. "market:ITEM_SOLD item already sold"). Not stable — don't switch on it. */
   errorDetail?: string;

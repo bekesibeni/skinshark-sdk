@@ -392,9 +392,10 @@ trade status rolls them up):
 | `declined` | Buyer's fault after the Steam offer went out (declined / let it expire). | Full minus a 2% penalty |
 | `reverted` | Delivered, then recalled/refunded by the supplier. | Full |
 
-On a `failed` item, `error` is one of `LISTING_UNAVAILABLE`, `PRICE_CHANGED`,
+On a `failed` or `declined` item, `error` is one of `LISTING_UNAVAILABLE`, `PRICE_CHANGED`,
 `TRADE_URL_INVALID`, `STEAM_ACCOUNT_RESTRICTED`, `MARKET_UNAVAILABLE`,
-`PURCHASE_FAILED`, `NO_LISTING_AT_PRICE`, `BUYER_TRADE_RESTRICTED`. The optional
+`PURCHASE_FAILED`, `NO_LISTING_AT_PRICE`, `BUYER_TRADE_RESTRICTED`,
+`OFFER_NOT_ACCEPTED` (the buyer declined or ignored the Steam offer). The optional
 `errorDetail` carries the raw marketplace reason for debugging — treat it as
 opaque, don't branch on it.
 
