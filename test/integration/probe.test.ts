@@ -13,15 +13,15 @@ describe('integration — wire-compat probe', () => {
     expect(typeof m.id).toBe('string');
     expect(typeof m.email).toBe('string');
     expect(typeof m.feeBps).toBe('number');
-    expect(typeof m.merchantFeeBps).toBe('number');
+    expect(typeof m.buyFeeBps).toBe('number');
     expect(m.wallets).toBeDefined();
-    console.log('merchant', { id: m.id, feeBps: m.feeBps, merchantFeeBps: m.merchantFeeBps });
+    console.log('merchant', { id: m.id, feeBps: m.feeBps, buyFeeBps: m.buyFeeBps });
   });
 
   itLive('account.fees returns the fee config', async () => {
     const sdk = new Skinshark({ apiKey: API_KEY!, baseUrl: BASE_URL });
     const f = await sdk.account.fees();
-    expect(typeof f.merchantFeeBps).toBe('number');
+    expect(typeof f.buyFeeBps).toBe('number');
     expect(typeof f.globalDefaultFeeBps).toBe('number');
     expect(typeof f.effectiveChildFeeBps).toBe('number');
     console.log('fees', f);

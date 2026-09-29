@@ -25,7 +25,7 @@ describe('Skinshark client — envelope + auth', () => {
         data: {
           id: 'm-1', email: 'm@x.com', emailVerified: true, country: 'HU',
           roles: ['merchant'], twoFactorEnabled: false, twoFactorMethod: null,
-          feeBps: 100, merchantFeeBps: 200, childDefaultFeeBps: null,
+          feeBps: 100, buyFeeBps: 200, childDefaultFeeBps: null,
           wallets: { spot: { currency: 'USD', balance: 50 }, earnings: null },
           createdAt: '2026-01-01T00:00:00Z',
         },
@@ -35,7 +35,7 @@ describe('Skinshark client — envelope + auth', () => {
     const profile = await sdk.account.get();
 
     expect(profile.email).toBe('m@x.com');
-    expect(profile.merchantFeeBps).toBe(200);
+    expect(profile.buyFeeBps).toBe(200);
     expect(meta(profile)?.requestId).toBe('req-1');
     expect(meta(profile)?.status).toBe(200);
   });
@@ -85,7 +85,7 @@ describe('On-Behalf-Of injection', () => {
       .reply(200, {
         requestId: 'req-4', success: true,
         data: {
-          merchantFeeBps: 200, childDefaultFeeBps: null,
+          buyFeeBps: 200, childDefaultFeeBps: null,
           globalDefaultFeeBps: 100, effectiveChildFeeBps: 100,
         },
       });
@@ -119,7 +119,7 @@ describe('Retry behavior', () => {
         data: {
           id: 'm-1', email: 'm@x.com', emailVerified: true, country: 'HU',
           roles: ['merchant'], twoFactorEnabled: false, twoFactorMethod: null,
-          feeBps: 100, merchantFeeBps: 200, childDefaultFeeBps: null,
+          feeBps: 100, buyFeeBps: 200, childDefaultFeeBps: null,
           wallets: { spot: null, earnings: null },
           createdAt: '2026-01-01T00:00:00Z',
         },

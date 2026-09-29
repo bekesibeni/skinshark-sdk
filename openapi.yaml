@@ -259,7 +259,7 @@ components:
     MerchantProfile:
       type: object
       required:
-        [id, email, emailVerified, country, roles, twoFactorEnabled, twoFactorMethod, feeBps, merchantFeeBps, childDefaultFeeBps, wallets, createdAt]
+        [id, email, emailVerified, country, roles, twoFactorEnabled, twoFactorMethod, feeBps, buyFeeBps, sellFeeBps, childDefaultFeeBps, wallets, createdAt]
       properties:
         id: { type: string, format: uuid }
         email: { type: string, format: email }
@@ -273,11 +273,17 @@ components:
         feeBps:
           type: integer
           description: House fee on the merchant's *own* buys (rarely used).
-        merchantFeeBps:
+        buyFeeBps:
           type: integer
           description: |
-            Merchant's cut on each sub-user trade (added on top of the sub-user's
+            Merchant's cut on each sub-user buy (added on top of the sub-user's
             `feeBps`). 0–5000 basis points.
+        sellFeeBps:
+          type: integer
+          description: |
+            Merchant's cut on each sub-user sell, taken off the payout quote (sellers are
+            quoted and paid the net) and credited to the earnings wallet once the sell
+            completes. A reverted sell pays no fee. 0–5000 basis points.
         childDefaultFeeBps:
           type: [integer, "null"]
           description: Default house fee inherited by new sub-users; null falls back to global default.
@@ -299,9 +305,10 @@ components:
 
     FeesResponse:
       type: object
-      required: [merchantFeeBps, childDefaultFeeBps, globalDefaultFeeBps, effectiveChildFeeBps]
+      required: [buyFeeBps, sellFeeBps, childDefaultFeeBps, globalDefaultFeeBps, effectiveChildFeeBps]
       properties:
-        merchantFeeBps: { type: integer }
+        buyFeeBps: { type: integer }
+        sellFeeBps: { type: integer }
         childDefaultFeeBps: { type: [integer, "null"] }
         globalDefaultFeeBps: { type: integer }
         effectiveChildFeeBps:
@@ -1607,7 +1614,7 @@ components:
 
     SellPricesResponse:
       type: array
-      description: Skinbolt payout book — what we pay per item.
+      description: Payout book — what we pay per item.
       items: { $ref: '#/components/schemas/SellPrice' }
 
     SellItem:
@@ -1923,7 +1930,7 @@ paths:
       description: |
         **Auth context:** merchant only.
 
-        Returns the merchant's `merchantFeeBps`, the per-merchant default house
+        Returns the merchant's `buyFeeBps` and `sellFeeBps`, the per-merchant default house
         fee for new sub-users, the global default, and the resolved effective
         child fee (`childDefaultFeeBps ?? globalDefaultFeeBps`).
 

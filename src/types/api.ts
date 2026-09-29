@@ -44,7 +44,10 @@ export interface MerchantProfile {
   twoFactorEnabled: boolean;
   twoFactorMethod: string | null;
   feeBps: number;
-  merchantFeeBps: number;
+  /** Merchant's cut on each sub-user buy, on top of the sub-user's feeBps. */
+  buyFeeBps: number;
+  /** Merchant's cut on each sub-user sell, taken off the payout quote; paid once the sell completes. */
+  sellFeeBps: number;
   childDefaultFeeBps: number | null;
   wallets: {
     spot: { currency: string; balance: number } | null;
@@ -54,7 +57,8 @@ export interface MerchantProfile {
 }
 
 export interface FeesResponse {
-  merchantFeeBps: number;
+  buyFeeBps: number;
+  sellFeeBps: number;
   childDefaultFeeBps: number | null;
   globalDefaultFeeBps: number;
   effectiveChildFeeBps: number;
