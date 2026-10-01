@@ -103,8 +103,10 @@ sdk
 ├── market
 │   ├── suggest, search, item, prices                           (catalog)
 │   ├── listings, listing
-│   ├── buy(items, externalId?, opts?)
+│   ├── buy(items, externalId?, opts?)                          externalId doubles as idempotency key
 │   ├── quickBuy(body, externalId?, opts?)
+│   ├── watch(handlers, opts?) → { watch, unwatch, close }       live listing state (WebSocket)
+│   ├── removals(handlers, opts?) → { close }                   every removal, merchant only
 │   ├── sell.{prices,inventory,create(items, externalId?, opts?)}  sell to a SkinShark bot
 │   └── trades.{list,get,cancelItem,cancel}                     actor's own trades
 ├── raw.{get,post,put,patch,delete,request}                     untyped escape hatch
@@ -116,7 +118,7 @@ sdk
 └── request<T>({ method, path, query, body, opts })             alias for raw.request
 
 verifyWebhook(rawBody, headers, { secret, toleranceSeconds? })  standalone (no client)
-isError(e, key) / isAuthError / isRateLimited / isValidationError
+isError(e, key) / isAuthError / isRateLimited / isValidationError / isTransient
 meta(response) → { requestId, status, headers, rateLimit }
 ```
 
@@ -133,6 +135,14 @@ const trade = await sdk.market.buy(
   { onBehalfOf: 'user-42', tradeUrl: 'https://steamcommunity.com/...' },
 );
 
+// externalId is also the idempotency key: a repeat returns the first trade. Omit it and
+// the SDK generates one, so its own retries never buy twice.
+
+// A listing known to be gone is refused before any money moves; err.meta.listingIds
+// names exactly the dead ids. With fallback: 'same_item', a listing that dies later is
+// replaced by the cheapest copy of the same item at or under maxPrice.
+await sdk.market.buy([{ listingId: 'uuid-of-listing', maxPrice: '5.50', fallback: 'same_item' }]);
+
 // Quick-buy: server picks N cheapest matching listings
 const filled = await sdk.market.quickBuy(
   { itemId: 'item-id', maxPrice: '5.00', amount: 20, delivery: 'instant' },
@@ -140,8 +150,7 @@ const filled = await sdk.market.quickBuy(
   { onBehalfOf: 'user-42' },
 );
 
-// Doppler phase buy: EcoSteam-only, priced against the phase floor.
-// `phase` cannot be combined with delivery: 'instant'.
+// Doppler phase buy, priced against the phase floor.
 const phaseBuy = await sdk.market.quickBuy(
   { itemId: 'bayonet-doppler-fn', maxPrice: '1900.00', amount: 1, delivery: 'standard', phase: 'Ruby' },
   'order-7423',
@@ -176,12 +185,12 @@ const book = await u.market.sell.prices({ search: 'AK-47 | Redline' });
 ## Price feed
 
 ```ts
-// Per-item floors after fee: `instant` (C5 auto-deliver) and `standard`
-// (blended C5 + Eco min). Either may be null when there's no live listing.
+// Per-item floors after fee: `instant` (auto-deliver) and `standard`.
+// Either may be null when there's no live listing.
 const page = await sdk.market.prices({ page: 1, limit: 100 });
 for (const p of page.items) {
   console.log(p.itemId, p.marketHashName, p.instant, p.standard);
-  // Doppler items also carry `phases` — per-phase standard prices (EcoSteam), after fee.
+  // Doppler items also carry `phases` — per-phase standard prices, after fee.
   if (p.phases) console.log(p.phases); // e.g. { 'Phase 1': 402.26, Ruby: 1875.92 }
 }
 
@@ -205,12 +214,36 @@ for (const block of feed.items) {
 }
 
 // Lane health, so an empty page reads as "frozen source" not "nothing listed".
-console.log(feed.sources); // { c5game: { fresh: true, lastProjectedAt: 1756... } }
+console.log(feed.sources);
 ```
 
-For a live push stream of the same feed (plus the full C5 firehose), open the
-`wss://api.skinshark.gg/market/live` WebSocket with a `market`-scoped token from
-`POST /auth/ws-token` — see the OpenAPI spec. The SDK itself is HTTP-only.
+### Watching listings
+
+`market.watch()` holds a WebSocket that reports the state of the listings you
+show, then pushes price changes and removals as they happen. It mints its own
+ticket, reconnects with backoff, and re-sends the watch set after every
+reconnect — the `onState` answer covers anything that died meanwhile.
+
+```ts
+const w = sdk.as('user-42').market.watch({
+  onState:   (ls) => ls.forEach((l) => l.alive ? show(l) : drop(l.listingId)),
+  onUpdated: (ls) => ls.forEach((l) => reprice(l.listingId, l.price)),
+  onRemoved: (ls) => ls.forEach((l) => drop(l.listingId)),
+  onError:   (e, fatal) => { if (isError(e, 'WATCH_LIMIT')) trim(); },
+});
+w.watch(cartListingIds);   // up to 500 ids for a sub-user, 20,000 for the merchant
+w.unwatch(['uuid-of-listing']);
+w.close();
+```
+
+Merchants serving the whole book can take every removal instead:
+
+```ts
+const feed = sdk.market.removals({ onRemoved: (ls) => ls.forEach((l) => evict(l.listingId)) });
+```
+
+Both use Node's global `WebSocket` (Node 22+). Pass `{ WebSocket }` from the
+`ws` package to get permessage-deflate, which cuts the removals feed about 4x.
 
 ## Creating sub-users
 
@@ -395,7 +428,8 @@ trade status rolls them up):
 On a `failed` or `declined` item, `error` is one of `LISTING_UNAVAILABLE`, `PRICE_CHANGED`,
 `TRADE_URL_INVALID`, `STEAM_ACCOUNT_RESTRICTED`, `MARKET_UNAVAILABLE`,
 `PURCHASE_FAILED`, `NO_LISTING_AT_PRICE`, `BUYER_TRADE_RESTRICTED`,
-`OFFER_NOT_ACCEPTED` (the buyer declined or ignored the Steam offer). The optional
+`OFFER_NOT_ACCEPTED` (the buyer declined or ignored the Steam offer),
+`SELLER_FAILED` (bought, but the seller never delivered — buy again). The optional
 `errorDetail` carries the raw marketplace reason for debugging — treat it as
 opaque, don't branch on it.
 
@@ -460,7 +494,7 @@ A single `SkinsharkError` class is thrown for every failure. Use the discriminat
 ```ts
 import {
   Skinshark, SkinsharkError,
-  isError, isAuthError, isRateLimited, isValidationError,
+  isError, isAuthError, isRateLimited, isValidationError, isTransient,
 } from '@skinshark/sdk';
 
 try {
@@ -474,6 +508,7 @@ try {
     status: e.status,
     requestId: e.requestId,    // include in support tickets
     retryAfterMs: e.retryAfterMs,
+    meta: e.meta,              // per-error detail, e.g. { listingIds } on LISTING_NOT_FOUND
   });
 
   if (isError(e, 'INSUFFICIENT_BALANCE')) {/* refill */}
@@ -482,6 +517,7 @@ try {
   if (isAuthError(e))                     {/* rotate key, check IP allowlist */}
   if (isRateLimited(e))                   {await sleep(e.retryAfterMs ?? 1000);}
   if (isValidationError(e))               {/* probably a programmer error */}
+  if (isTransient(e))                     {/* same call can succeed after a backoff */}
 }
 ```
 
@@ -507,7 +543,7 @@ new Skinshark({
   apiKey: '...',                  // required
   webhookSecret: '...',           // optional — enables sdk.verifyWebhook() without per-call secret
   baseUrl: 'https://api.skinshark.gg',  // default
-  timeoutMs: 30_000,              // per-request, default 30s
+  timeoutMs: 30_000,              // per-request, default 30s; 0 disables
   retries: { max: 3, baseDelayMs: 200 },   // 429 + 5xx with Retry-After honored
   // retries: false,              // disable
   userAgent: '@my-app/1.2.3',

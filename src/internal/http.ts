@@ -7,6 +7,7 @@ import got, {
   type OptionsOfTextResponseBody,
   type OptionsOfUnknownResponseBody,
   type Response,
+  type RetryFunction,
 } from 'got';
 import { SkinsharkError } from '../errors.js';
 import { META_SYMBOL, type ResponseMeta } from '../meta.js';
@@ -43,6 +44,7 @@ export interface RequestOptions {
 interface CallContext extends Record<string, unknown> {
   onBehalfOf?: string | undefined;
   idempotencyKey?: string | undefined;
+  retryBaseDelayMs?: number | undefined;
   startedAt?: number | undefined;
   debug?: DebugHook | undefined;
 }
@@ -72,6 +74,8 @@ export interface InternalRequestInit {
 }
 
 const REDACTED = '<redacted>';
+// got accepts undefined to clear an inherited delay; its types only admit a number.
+const NO_TIMEOUT = { request: undefined } as unknown as { request: number };
 // Replaced at build time by tsdown/vitest `define`. Stays in sync with package.json automatically.
 declare const __SDK_VERSION__: string;
 const SDK_VERSION = __SDK_VERSION__;
@@ -155,6 +159,14 @@ function makeResponseMeta(
   return meta;
 }
 
+// Everything on an error envelope besides code/key/message is per-error detail the caller may
+// act on, e.g. `listingIds` on LISTING_NOT_FOUND.
+function errorMeta(errInfo: Envelope<unknown>['error']): Record<string, unknown> | undefined {
+  if (!errInfo) return undefined;
+  const { code: _code, key: _key, message: _message, ...rest } = errInfo;
+  return Object.keys(rest).length > 0 ? rest : undefined;
+}
+
 function attachMeta<T>(value: T, meta: ResponseMeta): T {
   if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
     Object.defineProperty(value as object, META_SYMBOL, {
@@ -170,11 +182,15 @@ function attachMeta<T>(value: T, meta: ResponseMeta): T {
 export class HttpClient {
   readonly client: Got;
   readonly defaults: Pick<RequestOptions, 'onBehalfOf'>;
+  /** Without the trailing slash, e.g. `https://api.skinshark.gg`. */
+  readonly baseUrl: string;
   private readonly debug: DebugHook | undefined;
+  private readonly calculateDelay: RetryFunction;
 
   constructor(opts: SkinsharkClientOptions, defaults: Pick<RequestOptions, 'onBehalfOf'> = {}) {
     this.defaults = defaults;
-    const baseUrl = (opts.baseUrl ?? 'https://api.skinshark.gg').replace(/\/+$/, '') + '/';
+    this.baseUrl = (opts.baseUrl ?? 'https://api.skinshark.gg').replace(/\/+$/, '');
+    const baseUrl = this.baseUrl + '/';
     const ua = opts.userAgent ?? `@skinshark/sdk/${SDK_VERSION} (+https://skinshark.gg)`;
     const apiKey = opts.apiKey;
     const timeoutMs = opts.timeoutMs ?? 30_000;
@@ -183,12 +199,25 @@ export class HttpClient {
       : opts.debug === true ? ((e: DebugEvent) => console.debug('[skinshark]', e))
       : undefined;
     this.debug = debug;
+    const defaultBaseDelayMs = retryCfg === false ? 200 : retryCfg.baseDelayMs ?? 200;
+    this.calculateDelay = ({ attemptCount, retryOptions, error, computedValue }) => {
+      if (attemptCount > (retryOptions.limit ?? 3)) return 0;
+      // Floor at 1ms — got treats 0 as "stop retrying".
+      const retryAfter = parseRetryAfter(error.response?.headers['retry-after'] as string | undefined);
+      if (retryAfter !== undefined) return Math.max(1, Math.min(retryAfter, 60_000));
+      const ctx = (error.options?.context ?? {}) as CallContext;
+      const base = ctx.retryBaseDelayMs ?? defaultBaseDelayMs;
+      const exp = base * 2 ** (attemptCount - 1);
+      const jitter = Math.random() * base;
+      return Math.max(1, Math.min(exp + jitter, computedValue));
+    };
 
     this.client = got.extend({
       prefixUrl: baseUrl,
       responseType: 'json',
       throwHttpErrors: true,
-      timeout: { request: timeoutMs },
+      // 0 disables the timeout.
+      timeout: timeoutMs > 0 ? { request: timeoutMs } : NO_TIMEOUT,
       retry:
         retryCfg === false
           ? { limit: 0 }
@@ -199,16 +228,7 @@ export class HttpClient {
               // expands to POST/PATCH when an Idempotency-Key is present.
               methods: IDEMPOTENT_METHODS,
               backoffLimit: 8000,
-              calculateDelay: ({ attemptCount, retryOptions, error, computedValue }) => {
-                if (attemptCount > (retryOptions.limit ?? 3)) return 0;
-                // Floor at 1ms — got treats 0 as "stop retrying".
-                const retryAfter = parseRetryAfter(error.response?.headers['retry-after'] as string | undefined);
-                if (retryAfter !== undefined) return Math.max(1, Math.min(retryAfter, 60_000));
-                const base = retryCfg.baseDelayMs ?? 200;
-                const exp = base * 2 ** (attemptCount - 1);
-                const jitter = Math.random() * base;
-                return Math.max(1, Math.min(exp + jitter, computedValue));
-              },
+              calculateDelay: this.calculateDelay,
             },
       hooks: {
         beforeRequest: [
@@ -290,6 +310,7 @@ export class HttpClient {
     const ctx: CallContext = {
       onBehalfOf: mergedOpts.onBehalfOf,
       idempotencyKey: mergedOpts.idempotencyKey,
+      retryBaseDelayMs: mergedOpts.retries ? mergedOpts.retries.baseDelayMs : undefined,
       debug: this.debug,
     };
 
@@ -299,15 +320,19 @@ export class HttpClient {
       ...(searchParams ? { searchParams } : {}),
       ...(init.body !== undefined ? { json: init.body as Record<string, unknown> } : {}),
       ...(mergedOpts.signal ? { signal: mergedOpts.signal } : {}),
-      ...(mergedOpts.timeoutMs ? { timeout: { request: mergedOpts.timeoutMs } } : {}),
+      ...(mergedOpts.timeoutMs !== undefined
+        ? { timeout: mergedOpts.timeoutMs > 0 ? { request: mergedOpts.timeoutMs } : NO_TIMEOUT }
+        : {}),
       ...(mergedOpts.headers ? { headers: mergedOpts.headers } : {}),
     };
 
     if (mergedOpts.retries === false) {
       options.retry = { limit: 0 };
     } else if (mergedOpts.retries) {
+      // calculateDelay too: a client built with `retries: false` has none to inherit.
       options.retry = {
         limit: mergedOpts.retries.max ?? 3,
+        calculateDelay: this.calculateDelay,
         ...(mergedOpts.idempotencyKey ? { methods: KEYED_RETRY_METHODS } : {}),
       };
     } else if (mergedOpts.idempotencyKey) {
@@ -376,6 +401,7 @@ export class HttpClient {
           message: errInfo?.message ?? 'Server returned an unsuccessful envelope',
           status: response.statusCode,
           requestId,
+          meta: errorMeta(errInfo),
         });
       }
 
@@ -430,6 +456,7 @@ function mapError(
       status,
       requestId,
       retryAfterMs: retryAfter,
+      meta: errorMeta(errInfo),
       cause: e,
     });
     if (debug) {

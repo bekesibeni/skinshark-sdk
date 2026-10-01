@@ -1,4 +1,14 @@
 import type { HttpClient, RequestOptions } from '../internal/http.js';
+import { newIdempotencyKey } from '../internal/idempotency.js';
+import {
+  marketRemovals,
+  watchMarket,
+  type LiveConnection,
+  type LiveOptions,
+  type MarketRemovalsHandlers,
+  type MarketWatch,
+  type MarketWatchHandlers,
+} from './live.js';
 import type {
   SuggestionsResponse, SearchResponse, ItemDetailResponse,
   ListingsResponse, MarketListing,
@@ -18,6 +28,16 @@ export interface BuyOptions extends RequestOptions {
 
 export interface SellOptions extends RequestOptions {
   tradeUrl?: string;
+}
+
+// The API replays a buy by its externalId, so that is the key a retry must carry. One is minted
+// when the caller gave neither, and the Idempotency-Key header makes got retry the POST.
+function idempotentBuy(
+  externalId: string | undefined,
+  opts: BuyOptions | undefined,
+): { externalId: string; opts: BuyOptions } {
+  const key = externalId ?? opts?.idempotencyKey ?? newIdempotencyKey();
+  return { externalId: key, opts: { ...opts, idempotencyKey: opts?.idempotencyKey ?? key } };
 }
 
 export class MarketTradesModule {
@@ -123,6 +143,20 @@ export class MarketModule {
     return this.http.request<MarketFeedResponse>('GET', 'market', { query, opts });
   }
 
+  /**
+   * Watch listings over the live socket: their state on every `watch()`, then price changes and
+   * removals as they happen. Reconnects on its own and re-sends the watch set. 500 ids per socket
+   * for a sub-user, 20,000 for the merchant itself.
+   */
+  watch(handlers: MarketWatchHandlers, opts?: LiveOptions): MarketWatch {
+    return watchMarket(this.http, handlers, opts);
+  }
+
+  /** Every listing that leaves the market, batched every 250 ms. Merchant account only. */
+  removals(handlers: MarketRemovalsHandlers, opts?: LiveOptions): LiveConnection {
+    return marketRemovals(this.http, handlers, opts);
+  }
+
   /** Item detail with per-marketplace price + count overview. */
   item(itemId: ItemId | string, opts?: RequestOptions): Promise<ItemDetailResponse> {
     return this.http.request<ItemDetailResponse>('GET', `market/items/${encodeURIComponent(itemId)}`, { opts });
@@ -148,7 +182,9 @@ export class MarketModule {
    * POST /market/buy — buy specific listings (1–10).
    *
    * @param items 1–10 listing references with per-item maxPrice ceiling.
-   * @param externalId Your correlation id, echoed back on the Trade.
+   * @param externalId Your correlation id, echoed back on the Trade. Also the idempotency key: a
+   *   repeat with the same id returns the first trade. Generated when omitted, so the SDK's own
+   *   retries never buy twice.
    * @param opts onBehalfOf, tradeUrl override, signal, headers.
    */
   buy(
@@ -156,17 +192,20 @@ export class MarketModule {
     externalId?: string,
     opts?: BuyOptions,
   ): Promise<BuyResponse> {
-    const body: { items: BuyItem[]; externalId?: string; tradeUrl?: string } = { items };
-    if (externalId !== undefined) body.externalId = externalId;
+    const keyed = idempotentBuy(externalId, opts);
+    const body: { items: BuyItem[]; externalId?: string; tradeUrl?: string } = {
+      items,
+      externalId: keyed.externalId,
+    };
     if (opts?.tradeUrl !== undefined) body.tradeUrl = opts.tradeUrl;
-    return this.http.request<BuyResponse>('POST', 'market/buy', { body, opts });
+    return this.http.request<BuyResponse>('POST', 'market/buy', { body, opts: keyed.opts });
   }
 
   /**
    * POST /market/buy/quick — server picks N cheapest listings ≤ maxPrice.
    *
    * @param body itemId, maxPrice, amount, delivery.
-   * @param externalId Your correlation id.
+   * @param externalId Your correlation id and idempotency key; generated when omitted.
    * @param opts onBehalfOf, tradeUrl override.
    */
   quickBuy(
@@ -174,9 +213,12 @@ export class MarketModule {
     externalId?: string,
     opts?: BuyOptions,
   ): Promise<QuickBuyResponse> {
-    const fullBody: QuickBuyBody = { ...body };
-    if (externalId !== undefined) fullBody.externalId = externalId;
+    const keyed = idempotentBuy(externalId, opts);
+    const fullBody: QuickBuyBody = { ...body, externalId: keyed.externalId };
     if (opts?.tradeUrl !== undefined) fullBody.tradeUrl = opts.tradeUrl;
-    return this.http.request<QuickBuyResponse>('POST', 'market/buy/quick', { body: fullBody, opts });
+    return this.http.request<QuickBuyResponse>('POST', 'market/buy/quick', {
+      body: fullBody,
+      opts: keyed.opts,
+    });
   }
 }

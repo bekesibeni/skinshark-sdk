@@ -7,6 +7,14 @@ export type {
 
 export { ScopedClient } from './modules/scoped.js';
 export type { BuyOptions, SellOptions } from './modules/market.js';
+export type {
+  LiveConnection,
+  LiveOptions,
+  MarketWatch,
+  MarketWatchHandlers,
+  MarketRemovalsHandlers,
+  WebSocketConstructor,
+} from './modules/live.js';
 
 export { RawModule } from './modules/raw.js';
 export type { RawMethod, RawRequestInit, RawFetchRequestInit } from './modules/raw.js';
@@ -25,6 +33,7 @@ export {
   isAuthError,
   isRateLimited,
   isValidationError,
+  isTransient,
 } from './errors.js';
 export type { SkinsharkErrorInit } from './errors.js';
 

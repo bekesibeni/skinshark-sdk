@@ -22,7 +22,7 @@ export type TradeStatus = 'initiated' | 'pending' | 'active' | 'hold' | 'complet
 /** `buy` = purchased from a marketplace; `sell` = sold to a SkinShark bot for a payout. */
 export type TradeType = 'buy' | 'sell';
 /** Stable partner-facing failure code, set on a trade item's `error` when its `status` is `failed` or `declined`. */
-export type TradeFailureCode = 'LISTING_UNAVAILABLE' | 'NO_LISTING_AT_PRICE' | 'PRICE_CHANGED' | 'TRADE_URL_INVALID' | 'STEAM_ACCOUNT_RESTRICTED' | 'BUYER_TRADE_RESTRICTED' | 'OFFER_NOT_ACCEPTED' | 'MARKET_UNAVAILABLE' | 'PURCHASE_FAILED';
+export type TradeFailureCode = 'LISTING_UNAVAILABLE' | 'NO_LISTING_AT_PRICE' | 'PRICE_CHANGED' | 'TRADE_URL_INVALID' | 'STEAM_ACCOUNT_RESTRICTED' | 'BUYER_TRADE_RESTRICTED' | 'OFFER_NOT_ACCEPTED' | 'MARKET_UNAVAILABLE' | 'SELLER_FAILED' | 'PURCHASE_FAILED';
 export type DepositStatus = 'initiated' | 'pending' | 'completed' | 'partial' | 'expired' | 'cancelled' | 'refunded' | 'failed';
 export type DepositMethod = 'gatepay' | 'onramp' | 'crypto';
 export type DepositCurrency = 'USDT' | 'USDC' | 'DAI' | 'BTC' | 'ETH' | 'SOL';
@@ -640,6 +640,32 @@ export interface MarketFeedResponse {
 }
 
 
+// ── Live socket (GET /market/live) ───────────────────────────────────
+export interface LiveReady {
+  scope: 'watch' | 'removals';
+  /** Ids this socket may watch at once (watch scope only). */
+  limit?: number;
+}
+
+export interface LiveListingState {
+  listingId: ListingId | string;
+  /** False when sold, delisted, held by an order in flight, or refused by `buy`. */
+  alive: boolean;
+  /** Decimal, with the ticket owner's fee. Present while alive. */
+  price?: number;
+  delivery?: DeliveryMode;
+}
+
+export interface LiveListingUpdated {
+  listingId: ListingId | string;
+  price: number;
+}
+
+export interface LiveListingRemoved {
+  listingId: ListingId | string;
+  itemId?: ItemId | string;
+}
+
 // ── Trades ───────────────────────────────────────────────────────────
 export interface BuyItem {
   /** From `MarketListing.id`. Provide exactly one of `listingId` or `listingRawId`. */
@@ -650,6 +676,9 @@ export interface BuyItem {
   maxPrice: string;
   /** Your own ref for this item. Unique per request; addressable on cancel. */
   externalId?: string;
+  /** `same_item`: if the listing is gone by purchase time, buy the cheapest other listing of the
+   *  same item, phase and delivery tier at or under `maxPrice` instead. Default `none`. */
+  fallback?: 'none' | 'same_item';
 }
 
 export interface BuyBody {

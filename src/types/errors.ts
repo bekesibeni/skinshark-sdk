@@ -121,6 +121,8 @@ export type ErrorKey =
   | 'TRADE_CANCEL_TOO_SOON'
   | 'DUPLICATE_LISTING_ID'
   | 'TRADE_LIMIT_EXCEEDED'
+  | 'MARKET_BOOK_NOT_READY'
+  | 'MARKET_BOOK_BUSY'
   // Sell / own Steam bots (2100–2109)
   | 'NO_BOTS_AVAILABLE'
   | 'USER_NOT_TRADEABLE'
@@ -132,6 +134,11 @@ export type ErrorKey =
   | 'NO_OFFER_FOUND'
   | 'ITEMS_NOT_ACCEPTED'
   | 'PRICING_UNAVAILABLE'
+  | 'BOT_IN_USE'
+  | 'SELL_REQUIRES_MERCHANT'
+  | 'BOT_ALREADY_EXISTS'
+  | 'SELL_DISABLED'
+  | 'ITEM_OVERSTOCKED'
   | 'INTERNAL'
   | 'MAINTENANCE_MODE'
   | 'SERVICE_DISABLED'
@@ -139,6 +146,8 @@ export type ErrorKey =
   | 'SDK_NETWORK'
   | 'SDK_ABORTED'
   | 'SDK_INVALID_RESPONSE'
+  // Live socket: a watch frame would take the socket past its id limit (`meta.limit`).
+  | 'WATCH_LIMIT'
   // Open-ended fallback so unknown server keys still typecheck.
   | (string & {});
 
@@ -160,6 +169,10 @@ export const ERROR_STATUS: Record<string, number> = {
   NO_BOTS_AVAILABLE: 503, USER_NOT_TRADEABLE: 422, INVENTORY_PRIVATE: 422, STEAM_UNAVAILABLE: 503,
   TRADE_OFFER_FAILED: 502, ESCROW_NOT_ALLOWED: 422, STEAM_BOTS_NOT_CONFIGURED: 503,
   NO_OFFER_FOUND: 422, ITEMS_NOT_ACCEPTED: 422, PRICING_UNAVAILABLE: 503,
+  BOT_IN_USE: 409, SELL_REQUIRES_MERCHANT: 403, BOT_ALREADY_EXISTS: 409, SELL_DISABLED: 403,
+  ITEM_OVERSTOCKED: 409,
+  LISTING_NOT_FOUND: 404, MARKET_UNAVAILABLE: 503,
+  MARKET_BOOK_NOT_READY: 503, MARKET_BOOK_BUSY: 503,
 };
 
 // Category sets used by isAuthError / isRateLimited / isValidationError.
@@ -176,4 +189,11 @@ export const VALIDATION_ERROR_KEYS = new Set<string>([
 
 export const RATE_LIMIT_ERROR_KEYS = new Set<string>([
   'RATE_LIMITED',
+]);
+
+// Failures that clear on their own: the same call can succeed after a backoff.
+export const TRANSIENT_ERROR_KEYS = new Set<string>([
+  'RATE_LIMITED', 'MARKET_UNAVAILABLE', 'MARKET_TIMEOUT', 'MARKET_BOOK_NOT_READY', 'MARKET_BOOK_BUSY',
+  'STEAM_UNAVAILABLE', 'NO_BOTS_AVAILABLE', 'PRICING_UNAVAILABLE', 'MAINTENANCE_MODE',
+  'SDK_TIMEOUT', 'SDK_NETWORK',
 ]);

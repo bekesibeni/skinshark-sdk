@@ -1,6 +1,7 @@
 import {
   AUTH_ERROR_KEYS,
   RATE_LIMIT_ERROR_KEYS,
+  TRANSIENT_ERROR_KEYS,
   VALIDATION_ERROR_KEYS,
   type ErrorKey,
 } from './types/errors.js';
@@ -56,4 +57,8 @@ export function isRateLimited(e: unknown): e is SkinsharkError {
 
 export function isValidationError(e: unknown): e is SkinsharkError {
   return e instanceof SkinsharkError && VALIDATION_ERROR_KEYS.has(e.key);
+}
+
+export function isTransient(e: unknown): e is SkinsharkError {
+  return e instanceof SkinsharkError && TRANSIENT_ERROR_KEYS.has(e.key);
 }
