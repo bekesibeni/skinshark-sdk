@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import nock from 'nock';
-import { Skinshark, isError } from '../../src/index.js';
+import { Skinshark, isError, isTransient } from '../../src/index.js';
 
 const BASE = 'https://api.skinshark.gg';
 const API_KEY = 'sk_test_sell';
@@ -108,6 +108,24 @@ describe('market.sell — create', () => {
       expect.unreachable('should have thrown');
     } catch (e) {
       expect(isError(e, 'NO_BOTS_AVAILABLE')).toBe(true);
+    }
+  });
+
+  it('maps SELL_CAPACITY_EXHAUSTED (503) as not transient', async () => {
+    nock(BASE)
+      .post('/market/sell')
+      .reply(503, {
+        requestId: 'r5b', success: false,
+        error: { code: 2115, key: 'SELL_CAPACITY_EXHAUSTED', message: 'Selling is paused: we cannot take in more items right now' },
+      });
+
+    const sdk = new Skinshark({ apiKey: API_KEY });
+    try {
+      await sdk.market.sell.create([{ id: 'enc-1', price: '4.20' }]);
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      expect(isError(e, 'SELL_CAPACITY_EXHAUSTED')).toBe(true);
+      expect(isTransient(e)).toBe(false);
     }
   });
 });

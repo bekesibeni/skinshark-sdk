@@ -604,6 +604,12 @@ export interface MarketListing {
    */
   previewToken: string | null;
   delivery?: string;
+  /**
+   * Item listing reads only. False when no quick buy would take this row (priced far under every
+   * other market, so almost always already sold): a quick-buy `maxPrice` copied from it is refused
+   * with `PRICE_BELOW_MINIMUM`. The row can still be bought by its `id`.
+   */
+  quickBuyable?: boolean;
 }
 
 export interface ListingsResponse {
@@ -748,6 +754,13 @@ export interface TradeItem {
   error?: TradeFailureCode;
   /** Raw marketplace reason for debugging (e.g. "market:ITEM_SOLD item already sold"). Not stable — don't switch on it. */
   errorDetail?: string;
+  /**
+   * Quick buys only. On a `failed` item whose book moved above your `maxPrice` before it filled: the
+   * fee-inclusive USD price a quick buy for the same item would have to bid when it failed — the same
+   * figure a synchronous `PRICE_BELOW_MINIMUM` returns as `meta.minPrice`. Absent when your bid still
+   * cleared (the listing was simply taken first).
+   */
+  minPrice?: number;
   /** Present only on refunded items (failed/canceled/declined/reverted). `amount + penalty === price`. */
   refund?: ItemRefund;
 }
@@ -793,15 +806,21 @@ export interface MerchantTradeListResponse {
   nextCursor: string | null;
 }
 
+/**
+ * `cancel_requested`: the supplier only took a request the seller may still beat by delivering.
+ * The item stays `pending` and refunds in full once the seller's side cancels.
+ */
+export type CancelItemStatus = 'cancelled' | 'cancel_requested' | 'failed';
+
 export interface CancelItemResponse {
   itemId: string;
-  status: 'cancelled' | 'failed';
+  status: CancelItemStatus;
 }
 
 export interface CancelTradeItemOutcome {
   itemId: string;
   externalId?: string;
-  status: 'cancelled' | 'failed';
+  status: CancelItemStatus;
   /** Stable error key when the cancel was refused. */
   reason?: string;
 }
@@ -810,6 +829,8 @@ export interface CancelTradeResponse {
   tradeId: TradeId;
   requested: number;
   cancelled: number;
+  /** Items whose cancel is only a request so far. */
+  cancelRequested: number;
   failed: number;
   items: CancelTradeItemOutcome[];
 }
