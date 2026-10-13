@@ -376,7 +376,7 @@ app.post('/webhooks/skinshark',
         case 'trade.completed':  /* event.data.trade */ break;
         case 'trade.failed':     /* items[].error — a TradeFailureCode */ break;
         case 'trade.canceled':   /* canceled before delivery — full refund */ break;
-        case 'trade.declined':   /* buyer-fault decline — refund minus 2% penalty */ break;
+        case 'trade.declined':   /* buyer declined or let the offer expire — full refund */ break;
         case 'item.active':      /* multi-item trades: event.data.item.offerId is this item's offer */ break;
         case 'deposit.completed':/* event.data.deposit */ break;
         // ...
@@ -422,8 +422,8 @@ trade status rolls them up):
 | `completed` | Items delivered and the hold released. | — |
 | `failed` | The purchase couldn't be placed/delivered. `items[].error` carries a `TradeFailureCode`. | Full |
 | `canceled` | Canceled before delivery — by the platform, or by the user while still `pending`. | Full |
-| `declined` | Buyer's fault after the Steam offer went out (declined / let it expire). | Full minus a 2% penalty |
-| `reverted` | Delivered, then recalled/refunded by the supplier. | Full |
+| `declined` | The buyer declined the Steam offer or let it expire. | Full |
+| `reverted` | Delivered, then rolled back; the trade's `revertedBy` says by whom. | Full on a seller revert; the listing's `revertRefundPercent` of the price on a buyer revert |
 
 On a `failed` or `declined` item, `error` is one of `LISTING_UNAVAILABLE`, `PRICE_CHANGED`,
 `TRADE_URL_INVALID`, `STEAM_ACCOUNT_RESTRICTED`, `MARKET_UNAVAILABLE`,

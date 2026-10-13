@@ -99,9 +99,10 @@ export interface SerializedPayoutWithdrawal {
 
 export interface TradeRefundInfo {
   itemId: string;
-  buyerFault: boolean;
-  refunded: number;
-  penalty: number;
+  /** Your own per-item ref, when you supplied one at buy time. */
+  externalId?: string;
+  /** Credited back to your balance, in the trade currency: the item price except on a buyer revert after delivery. */
+  refundAmount: number;
 }
 
 export interface TradeEventData {

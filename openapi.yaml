@@ -232,8 +232,9 @@ components:
       enum: [initiated, pending, active, hold, completed, failed, canceled, declined, reverted]
       description: |
         Terminal outcomes — `completed` (delivered), `failed` (couldn't be placed/delivered; see item `error`),
-        `canceled` (canceled before delivery — full refund, no penalty), `declined` (buyer-fault decline after the
-        Steam offer was sent — refund minus a 2% penalty), `reverted` (delivered then recalled by the supplier).
+        `canceled` (canceled before delivery — full refund), `declined` (the buyer declined or let the Steam offer
+        expire — full refund), `reverted` (delivered, then rolled back; the trade's `revertedBy` says by whom). A
+        seller revert refunds in full; a buyer revert refunds the listing's `revertRefundPercent` of the price.
     TradeType:
       type: string
       enum: [buy, sell]
@@ -1174,6 +1175,13 @@ components:
             Null when the marketplace supplied no link and one could not be synthesized.
             Replaces the removed `inspectUrl` field.
         delivery: { type: string }
+        revertRefundPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >-
+            Share of the price refunded if the buyer rolls the trade back after delivery (a seller rollback always
+            refunds in full). Absent when the market does not say for this listing.
 
     ListingsResponse:
       type: object
@@ -1248,6 +1256,13 @@ components:
             Bare hex inspect token. Rebuild the in-game link as
             `steam://run/730//+csgo_econ_action_preview%20{previewToken}`.
         delivery: { type: string }
+        revertRefundPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >-
+            Share of the price refunded if the buyer rolls the trade back after delivery (a seller rollback always
+            refunds in full). Absent when the market does not say for this listing.
         prices:
           type: object
           description: |
@@ -1440,17 +1455,13 @@ components:
         errorDetail:
           type: string
           description: 'Raw marketplace reason for debugging (e.g. "c5:ITEM_SOLD item already sold"). Not stable — do not branch on it.'
-        refund:
-          type: object
+        refundAmount:
+          type: number
           description: |
             Present only on refunded items (status `failed`/`canceled`/`declined`/`reverted`), carried on every
-            trade snapshot and webhook. `amount + penalty == price`. On a buyer-fault `declined` a 2% penalty is
-            withheld; otherwise `penalty` is 0 and `amount` equals `price`. Buy trades only — sell items never carry it.
-          required: [amount, penalty, buyerFault]
-          properties:
-            amount: { type: number, description: Returned to the buyer. }
-            penalty: { type: number, description: "Withheld on buyer fault, else 0." }
-            buyerFault: { type: boolean, description: True when the item was declined as the buyer's fault. }
+            trade snapshot and webhook: what was returned to your balance, in the trade currency. It equals `price`
+            on everything except a buyer revert after delivery (`reverted` with `revertedBy: user`), which returns
+            the share the listing's `revertRefundPercent` named, possibly 0. Buy trades only — sell items never carry it.
 
     Trade:
       type: object

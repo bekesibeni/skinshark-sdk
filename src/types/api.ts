@@ -605,6 +605,11 @@ export interface MarketListing {
   previewToken: string | null;
   delivery?: string;
   /**
+   * Share of the price (integer 0–100) refunded if the buyer rolls the trade back after delivery; a
+   * seller rollback always refunds in full. Absent when the market does not say for this listing.
+   */
+  revertRefundPercent?: number;
+  /**
    * Item listing reads only. False when no quick buy would take this row (priced far under every
    * other market, so almost always already sold): a quick-buy `maxPrice` copied from it is refused
    * with `PRICE_BELOW_MINIMUM`. The row can still be bought by its `id`.
@@ -761,16 +766,13 @@ export interface TradeItem {
    * cleared (the listing was simply taken first).
    */
   minPrice?: number;
-  /** Present only on refunded items (failed/canceled/declined/reverted). `amount + penalty === price`. */
-  refund?: ItemRefund;
-}
-
-export interface ItemRefund {
-  /** Returned to the buyer, in USD. */
-  amount: number;
-  /** Withheld on buyer fault, in USD; 0 otherwise. */
-  penalty: number;
-  buyerFault: boolean;
+  /**
+   * Present only on refunded buy items (failed/canceled/declined/reverted): what was returned to your
+   * balance, in the trade currency. Equals `price` on everything except a buyer revert after delivery
+   * (`reverted` with the trade's `revertedBy: 'user'`), which returns the share the listing's
+   * `revertRefundPercent` named, possibly 0. Sell items never carry it.
+   */
+  refundAmount?: number;
 }
 
 export interface Trade {
