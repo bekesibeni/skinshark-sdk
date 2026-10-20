@@ -4,6 +4,7 @@ import type {
   CreateDepositBody, CreateDepositResponse,
   OnrampQuoteBody, OnrampQuoteResponse, OnrampSessionBody, OnrampSessionResponse,
   CryptoAddressResponse, CryptoQuoteBody, CryptoQuoteResponse,
+  CryptoVatDeclarationBody, CryptoVatDeclarationResponse,
   CancelDepositResponse, ResumeDepositResponse,
 } from '../types/api.js';
 import type { DepositId } from '../types/branded.js';
@@ -45,6 +46,14 @@ class CryptoDepositsModule {
   /** Same EVM address across all supported chains; idempotent. */
   address(opts?: RequestOptions): Promise<CryptoAddressResponse> {
     return this.http.request<CryptoAddressResponse>('GET', 'user/wallet/deposit/crypto/address', { opts });
+  }
+
+  /**
+   * Same address as `address()`, recording a VAT declaration on it. Deposits detected after the
+   * call withhold the VAT inside what is left after the fee into the merchant's `vat` wallet.
+   */
+  declareVat(body: CryptoVatDeclarationBody, opts?: RequestOptions): Promise<CryptoVatDeclarationResponse> {
+    return this.http.request<CryptoVatDeclarationResponse>('POST', 'user/wallet/deposit/crypto/address', { body, opts });
   }
 
   /** Per-chain receive + gas preview for the requested token + amount. */

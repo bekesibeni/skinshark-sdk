@@ -62,6 +62,10 @@ export interface SerializedWebhookDeposit {
   currency: string;
   amountCents: number;
   feeCents: number;
+  /** VAT withheld into the merchant's `vat` wallet; the user got amount − fee − vat. */
+  vatCents: number;
+  vatBps: number | null;
+  vatCountry: string | null;
   token: string | null;
   chain: string | null;
   cryptoAmount: string | null;

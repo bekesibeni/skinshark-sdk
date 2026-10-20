@@ -16,7 +16,7 @@ export type Currency = 'USD' | 'EUR';
 export type UserStatus = 'active' | 'suspended' | 'deleted';
 export type Role = 'user' | 'merchant' | 'admin';
 export type TwoFactorMethod = 'email' | 'totp';
-export type WalletType = 'spot' | 'earnings';
+export type WalletType = 'spot' | 'earnings' | 'vat';
 export type WalletStatus = 'active' | 'suspended' | 'closed';
 export type TradeStatus = 'initiated' | 'pending' | 'active' | 'hold' | 'completed' | 'failed' | 'canceled' | 'declined' | 'reverted';
 /** `buy` = purchased from a marketplace; `sell` = sold to a SkinShark bot for a payout. */
@@ -272,6 +272,17 @@ export interface CryptoAddressResponse {
   address: string;
   chains: CryptoEvmChain[];
   tokens: CryptoNativeToken[];
+}
+
+export interface CryptoVatDeclarationBody {
+  /** Basis points (2550 = 25.5%); 0 = no VAT. */
+  vatBps: number;
+  /** ISO 3166-1 alpha-2; omit for outside the EU. */
+  vatCountry?: string;
+}
+
+export interface CryptoVatDeclarationResponse extends CryptoAddressResponse {
+  vat: { bps: number; country: string | null };
 }
 
 export interface CryptoQuoteBody {
