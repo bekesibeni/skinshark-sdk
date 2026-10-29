@@ -107,6 +107,7 @@ sdk
 │   ├── quickBuy(body, externalId?, opts?)
 │   ├── watch(handlers, opts?) → { watch, unwatch, close }       live listing state (WebSocket)
 │   ├── removals(handlers, opts?) → { close }                   every removal, merchant only
+│   ├── export / loadExport / stream / syncExport               full-depth export + stream, merchant only
 │   ├── sell.{prices,inventory,create(items, externalId?, opts?)}  sell to a SkinShark bot
 │   └── trades.{list,get,cancelItem,cancel}                     actor's own trades
 ├── raw.{get,post,put,patch,delete,request}                     untyped escape hatch
@@ -118,6 +119,7 @@ sdk
 └── request<T>({ method, path, query, body, opts })             alias for raw.request
 
 verifyWebhook(rawBody, headers, { secret, toleranceSeconds? })  standalone (no client)
+loadBook(export, opts?) / applyBookFrame(map, frame) / decodeBookFrame(wire)  export/stream helpers
 isError(e, key) / isAuthError / isRateLimited / isValidationError / isTransient
 meta(response) → { requestId, status, headers, rateLimit }
 ```
@@ -244,6 +246,58 @@ const feed = sdk.market.removals({ onRemoved: (ls) => ls.forEach((l) => evict(l.
 
 Both use Node's global `WebSocket` (Node 22+). Pass `{ WebSocket }` from the
 `ws` package to get permessage-deflate, which cuts the removals feed about 4x.
+
+## Market export and stream
+
+Merchants with the market-data entitlement can hold the whole combined market: a full-depth export
+(gzipped NDJSON shards on short-lived links) plus a websocket of one-second frames that resumes
+from the export's `(epoch, seq)`. Prices are fee-inclusive for your tier, in integer cents
+(`priceCents`); detail (wear, seed, stickers, asset id…) depends on your level.
+
+The simplest form keeps a `Map<listingId, BookListing>` current on its own: export, load (bytes,
+sha256 and row counts checked), stream, and a full reload whenever the server resyncs.
+
+```ts
+const book = sdk.market.syncExport({
+  onFrame: (frame, b) => console.log(frame.seq, b.listings.size),
+  onResync: () => console.log('reloading'),
+  onError: (e, fatal) => { if (fatal) console.error('book stopped', e); },
+});
+await book.ready;                       // first load done; throws MARKET_DATA_NOT_ENABLED etc.
+const l = book.listings.get(listingId); // { id, itemId, phase, priceCents, instant, detail? }
+book.close();
+```
+
+`syncExport` follows every listing by default (the `listings` firehose entitlement); pass
+`{ items: ['<16-hex item id>', …] }` to load and follow only those, `channels: ['listings', 'prices']`
+to also get per-item tops on `onFrame`, and `detail: false` to skip the detail shards.
+
+The parts are usable on their own:
+
+```ts
+// Conditional export: null while the build behind the ETag is still the latest.
+const ex = await sdk.market.export({ ifNoneMatch: lastEtag });
+if (ex) {
+  lastEtag = ex.etag;
+  const { epoch, seq, listings } = await sdk.market.loadExport(ex, { concurrency: 8 });
+
+  const stream = sdk.market.stream(
+    {
+      onFrame: (f) => applyBookFrame(listings, f), // adds, price moves, removals
+      onResync: () => { /* drop the map, export + load again, open a new stream */ },
+    },
+    { channels: ['listings'], resume: { epoch, seq } },
+  );
+}
+```
+
+The stream mints its own ticket, decodes `msgpack` (the default) and `json` to the same frame
+shape, reconnects with backoff, resumes from the last frame it applied (also after a
+`SLOW_CONSUMER` close), drops duplicates, and treats a frame from another epoch as a resync. A seq
+jump is only treated as a gap (and reconnected over) when you take `prices` plus the whole
+`listings` firehose, because the server skips frames that hold nothing for a filtered
+subscription. `stream.subscribe(channels, items)` changes the subscription in place. The stream
+host defaults to `wss://stream.<api host without "api.">`; pass `url` to override.
 
 ## Creating sub-users
 

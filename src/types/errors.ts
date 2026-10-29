@@ -124,6 +124,14 @@ export type ErrorKey =
   | 'TRADE_LIMIT_EXCEEDED'
   | 'MARKET_BOOK_NOT_READY'
   | 'MARKET_BOOK_BUSY'
+  // Partner book: export and stream.
+  | 'MARKET_DATA_NOT_ENABLED'
+  | 'EXPORT_NOT_READY'
+  | 'FIREHOSE_NOT_ENABLED'
+  | 'ITEM_CAP_EXCEEDED'
+  | 'INVALID_MESSAGE'
+  // Stream closed with 4009: the socket fell behind; the stream client resumes on its own.
+  | 'SLOW_CONSUMER'
   // Sell / own Steam bots (2100–2109)
   | 'NO_BOTS_AVAILABLE'
   | 'USER_NOT_TRADEABLE'
@@ -149,6 +157,8 @@ export type ErrorKey =
   | 'SDK_NETWORK'
   | 'SDK_ABORTED'
   | 'SDK_INVALID_RESPONSE'
+  // A downloaded book shard failed its byte, hash or row check.
+  | 'SDK_BOOK_SHARD_INVALID'
   // Live socket: a watch frame would take the socket past its id limit (`meta.limit`).
   | 'WATCH_LIMIT'
   // Open-ended fallback so unknown server keys still typecheck.
@@ -176,6 +186,7 @@ export const ERROR_STATUS: Record<string, number> = {
   ITEM_OVERSTOCKED: 409, SELL_CAPACITY_EXHAUSTED: 503,
   LISTING_NOT_FOUND: 404, LISTING_BUYER_INELIGIBLE: 422, MARKET_UNAVAILABLE: 503,
   MARKET_BOOK_NOT_READY: 503, MARKET_BOOK_BUSY: 503,
+  MARKET_DATA_NOT_ENABLED: 403, EXPORT_NOT_READY: 503,
 };
 
 // Category sets used by isAuthError / isRateLimited / isValidationError.
@@ -197,6 +208,7 @@ export const RATE_LIMIT_ERROR_KEYS = new Set<string>([
 // Failures that clear on their own: the same call can succeed after a backoff.
 export const TRANSIENT_ERROR_KEYS = new Set<string>([
   'RATE_LIMITED', 'MARKET_UNAVAILABLE', 'MARKET_TIMEOUT', 'MARKET_BOOK_NOT_READY', 'MARKET_BOOK_BUSY',
+  'EXPORT_NOT_READY',
   'STEAM_UNAVAILABLE', 'NO_BOTS_AVAILABLE', 'PRICING_UNAVAILABLE', 'MAINTENANCE_MODE',
   'SDK_TIMEOUT', 'SDK_NETWORK',
 ]);

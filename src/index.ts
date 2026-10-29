@@ -16,6 +16,29 @@ export type {
   WebSocketConstructor,
 } from './modules/live.js';
 
+export { loadBook } from './modules/book.js';
+export type {
+  BookExport,
+  BookExportOptions,
+  LoadBookOptions,
+  LoadedBook,
+  SyncBookHandlers,
+  SyncBookOptions,
+  SyncedBook,
+} from './modules/book.js';
+export { applyBookFrame, decodeBookFrame } from './modules/bookCodec.js';
+export type {
+  BookListing,
+  BookPriceChange,
+  BookRemoval,
+  BookTop,
+  BookFrame,
+  BookPosition,
+  WireBookFrame,
+} from './modules/bookCodec.js';
+export { decodeStreamMessage } from './modules/bookStream.js';
+export type { BookStream, BookStreamHandlers, BookStreamOptions } from './modules/bookStream.js';
+
 export { RawModule } from './modules/raw.js';
 export type { RawMethod, RawRequestInit, RawFetchRequestInit } from './modules/raw.js';
 

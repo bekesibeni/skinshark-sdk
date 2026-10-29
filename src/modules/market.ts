@@ -1,6 +1,24 @@
 import type { HttpClient, RequestOptions } from '../internal/http.js';
 import { newIdempotencyKey } from '../internal/idempotency.js';
 import {
+  type BookExport,
+  type BookExportOptions,
+  exportBook,
+  type LoadBookOptions,
+  type LoadedBook,
+  loadBook,
+  type SyncBookHandlers,
+  type SyncBookOptions,
+  type SyncedBook,
+  syncBook,
+} from './book.js';
+import {
+  type BookStream,
+  type BookStreamHandlers,
+  type BookStreamOptions,
+  openBookStream,
+} from './bookStream.js';
+import {
   marketRemovals,
   watchMarket,
   type LiveConnection,
@@ -19,6 +37,7 @@ import type {
   MarketLiveQuery, MarketFeedResponse,
   SellItem, SellBody, SellResponse, SellInventory, SellInventoryQuery,
   SellPricesQuery, SellPricesResponse,
+  BookExportResponse,
 } from '../types/api.js';
 import type { ListingId, ItemId, TradeRef } from '../types/branded.js';
 
@@ -120,6 +139,32 @@ export class MarketModule {
   constructor(private readonly http: HttpClient) {
     this.trades = new MarketTradesModule(http);
     this.sell = new MarketSellModule(http);
+  }
+
+  /**
+   * GET /market/export — signed links to the latest full-depth build for your fee tier and level.
+   * Merchant only, with the market-data entitlement. `ifNoneMatch` makes a 304 answer null.
+   */
+  export(opts?: BookExportOptions): Promise<BookExport | null> {
+    return exportBook(this.http, opts);
+  }
+
+  /** Download, verify and join an export into `Map<listingId, BookListing>`. */
+  loadExport(exp: BookExportResponse, opts?: LoadBookOptions): Promise<LoadedBook> {
+    return loadBook(exp, opts);
+  }
+
+  /**
+   * The /market/stream websocket. Mints its own ticket, reconnects with backoff, resumes from the
+   * last applied frame, and decodes json and msgpack frames to one shape.
+   */
+  stream(handlers: BookStreamHandlers, opts: BookStreamOptions): BookStream {
+    return openBookStream(this.http, handlers, opts);
+  }
+
+  /** A self-maintaining copy of the market: export + load + stream, reloading on every resync. */
+  syncExport(handlers: SyncBookHandlers = {}, opts?: SyncBookOptions): SyncedBook {
+    return syncBook(this.http, handlers, opts);
   }
 
   /** Type-ahead suggestions for catalog items. */

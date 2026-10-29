@@ -138,7 +138,7 @@ function flattenHeaders(raw: Record<string, string | string[] | undefined>): Rec
   return out;
 }
 
-function makeResponseMeta(
+export function makeResponseMeta(
   requestId: string,
   status: number,
   rawHeaders: Record<string, string | string[] | undefined>,
@@ -167,7 +167,7 @@ function errorMeta(errInfo: Envelope<unknown>['error']): Record<string, unknown>
   return Object.keys(rest).length > 0 ? rest : undefined;
 }
 
-function attachMeta<T>(value: T, meta: ResponseMeta): T {
+export function attachMeta<T>(value: T, meta: ResponseMeta): T {
   if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
     Object.defineProperty(value as object, META_SYMBOL, {
       value: meta,

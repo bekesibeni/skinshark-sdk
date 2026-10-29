@@ -28,7 +28,7 @@ SKINSHARK_RUN_FULL_FLOW=1 SKINSHARK_TEST_API_KEY=... pnpm test:integration
 
 ## Architecture
 
-**Stack:** got 15 (HTTP), TypeScript 6 ESNext, ESM-only, Node 22+. tsdown (Rolldown) for build, vitest + nock for tests, pnpm for package management. Zero runtime deps besides got.
+**Stack:** got 15 (HTTP), TypeScript 6 ESNext, ESM-only, Node 22+. tsdown (Rolldown) for build, vitest + nock for tests, pnpm for package management. Runtime deps: got, plus msgpackr for the partner book stream.
 
 **Source of truth:** `openapi.yaml` at the repo root mirrors the SkinShark Merchant API exactly. Wire types in `src/types/api.ts` are hand-derived from it. When the spec changes, update the types and the matching module method together.
 

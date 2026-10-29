@@ -688,6 +688,64 @@ export interface LiveListingRemoved {
   itemId?: ItemId | string;
 }
 
+// ── Partner book (GET /market/export, /market/stream) ──────
+/** What a merchant's market-data entitlement shows per listing. */
+export type BookDataLevel = 'minimal' | 'extended' | 'full';
+
+export type BookStreamEncoding = 'json' | 'msgpack';
+
+export type BookChannel = 'prices' | 'listings';
+
+/** One gzipped NDJSON object of a build. Check `bytes`, `sha256` and `rows` after download. */
+export interface BookShardLink {
+  /** Short-lived signed link; it lapses at the export's `expiresAt`. */
+  url: string;
+  rows: number;
+  bytes: number;
+  /** Hex SHA-256 of the gzipped bytes. */
+  sha256: string;
+}
+
+export interface BookExportResponse {
+  /** The build's position: resume the stream from `(epoch, seq)` after loading it. */
+  epoch: string;
+  seq: number;
+  builtAt: string;
+  listings: number;
+  /** The fee tier every price in the build carries. */
+  feeBps: number;
+  level: BookDataLevel;
+  /** Price shards: `[id, itemId, phase, price, instant]` lines, price fee-inclusive ("12.34"). */
+  prices: BookShardLink[];
+  /** Detail shards (`[id, detail]` lines), null at the minimal level. */
+  detail: BookShardLink[] | null;
+  expiresAt: string;
+  stream: { path: string; encodings: BookStreamEncoding[] };
+}
+
+/** Per-listing detail. Extended adds wear, seed, paint index and stickers; full adds the rest. */
+export interface BookDetail {
+  wear?: number;
+  seed?: number;
+  paintIndex?: number;
+  stickers?: string[];
+  assetId?: string;
+  inspect?: string;
+  revertRefundPercent?: number;
+}
+
+/** The stream's first message, before any subscribe. `epoch` is null until the book has one. */
+export interface BookHello {
+  epoch: string | null;
+  seq: number;
+  level: BookDataLevel;
+  feeBps: number;
+  /** Whether `listings` may be subscribed without naming items. */
+  firehose: boolean;
+  /** Most items one subscribe may name. */
+  itemCap: number;
+}
+
 // ── Trades ───────────────────────────────────────────────────────────
 export interface BuyItem {
   /** From `MarketListing.id`. Provide exactly one of `listingId` or `listingRawId`. */

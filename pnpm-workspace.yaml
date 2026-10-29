@@ -1,0 +1,4 @@
+# pnpm 11 fails an install on an unapproved build script. msgpackr-extract only adds native
+# decode acceleration (msgpackr falls back to JS without it).
+allowBuilds:
+  msgpackr-extract: true

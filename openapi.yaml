@@ -1036,6 +1036,15 @@ components:
         limit: { type: integer }
         totalPages: { type: integer }
 
+    BookShardLink:
+      type: object
+      required: [url, rows, bytes, sha256]
+      properties:
+        url: { type: string, format: uri }
+        rows: { type: integer, minimum: 0 }
+        bytes: { type: integer, minimum: 0 }
+        sha256: { type: string, description: Hex SHA-256 of the gzipped bytes. }
+
     ItemDetail:
       type: object
       required: [id, name, marketHashName, itemType, iconUrl, description, price, listingsCount, steamPrice]
@@ -3157,6 +3166,75 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/RateLimited' }
+
+  /market/export:
+    get:
+      operationId: getMarketBookExport
+      tags: [Market]
+      summary: Partner book export (full-depth build)
+      description: |
+        **Auth context:** merchant (api-key), with the market-data entitlement. `On-Behalf-Of` is
+        refused.
+
+        Short-lived signed links to the latest full-depth build of the combined book, priced for
+        your fee tier and stripped to your level. Shards are gzipped NDJSON, one JSON array per
+        line:
+
+        - price shards: `[id, itemId, phase, price, instant]`, `price` a fee-inclusive decimal
+          string ("12.34"), `instant` 0|1;
+        - detail shards (extended/full only): `[id, detail]`; listings without detail are omitted.
+
+        Check each shard's `bytes`, `sha256` (hex, over the gzipped bytes) and `rows`, then resume
+        the stream (`wss://stream.skinshark.gg/market/stream`) from the build's
+        `(epoch, seq)`. Send the `ETag` back as `If-None-Match` to get a 304 while the build is
+        unchanged.
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [epoch, seq, builtAt, listings, feeBps, level, prices, detail, expiresAt, stream]
+                        properties:
+                          epoch: { type: string }
+                          seq: { type: integer, minimum: 0 }
+                          builtAt: { type: string, format: date-time }
+                          listings: { type: integer, minimum: 0 }
+                          feeBps: { type: integer, minimum: 0 }
+                          level: { type: string, enum: [minimal, extended, full] }
+                          prices:
+                            type: array
+                            items: { $ref: '#/components/schemas/BookShardLink' }
+                          detail:
+                            type: [array, 'null']
+                            items: { $ref: '#/components/schemas/BookShardLink' }
+                          expiresAt: { type: string, format: date-time }
+                          stream:
+                            type: object
+                            properties:
+                              path: { type: string }
+                              encodings:
+                                type: array
+                                items: { type: string, enum: [json, msgpack] }
+        '304':
+          description: Not modified — the build in `If-None-Match` is still the latest.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: '`MARKET_DATA_NOT_ENABLED` or `FORBIDDEN`.'
+        '503':
+          description: '`EXPORT_NOT_READY` — no build for your tier/level yet. Retry with backoff.'
 
   /market/items/{itemId}:
     get:
