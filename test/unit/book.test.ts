@@ -94,29 +94,29 @@ function fakeFetch(bodies: Record<string, Buffer>): typeof fetch {
   }) as typeof fetch;
 }
 
-function exportOf(epoch: string, seq: number, prices: BookShardLink[], detail: BookShardLink[] | null): BookExportResponse {
+function exportOf(epoch: string, seq: number, files: BookShardLink[]): BookExportResponse {
   return {
     epoch,
     seq,
     builtAt: '2026-10-29T10:00:00.000Z',
     listings: 3,
     feeBps: 300,
-    level: detail ? 'full' : 'minimal',
-    prices,
-    detail,
+    level: 'full',
+    files,
     expiresAt: '2026-10-29T10:15:00.000Z',
     stream: { path: '/market/stream', encodings: ['json', 'msgpack'] },
   };
 }
 
 function buildShards() {
-  const p0 = shard('https://r2.test/p0', [[L1, ITEM_A, 'Ruby', '100.25', 1], [L2, ITEM_A, null, '9.90', 0]]);
-  const p1 = shard('https://r2.test/p1', [[L3, ITEM_B, null, '3', 1]]);
-  const d0 = shard('https://r2.test/d0', [[L1, { wear: 0.01, assetId: '44001' }]]);
+  const f0 = shard('https://r2.test/f0', [
+    { id: L1, itemId: ITEM_A, name: 'Knife', phase: 'Ruby', price: '100.25', instant: true, wear: 0.01, assetId: '44001' },
+    { id: L2, itemId: ITEM_A, name: 'Knife', phase: null, price: '9.90', instant: false },
+  ]);
+  const f1 = shard('https://r2.test/f1', [{ id: L3, itemId: ITEM_B, name: null, phase: null, price: '3', instant: true }]);
   return {
-    prices: [p0.link, p1.link],
-    detail: [d0.link],
-    fetch: fakeFetch({ [p0.link.url]: p0.body, [p1.link.url]: p1.body, [d0.link.url]: d0.body }),
+    files: [f0.link, f1.link],
+    fetch: fakeFetch({ [f0.link.url]: f0.body, [f1.link.url]: f1.body }),
   };
 }
 
@@ -163,40 +163,39 @@ describe('market.export', () => {
 });
 
 describe('loadBook', () => {
-  it('downloads every shard and joins detail onto prices by id', async () => {
+  it('downloads every shard and reads each line as a whole listing', async () => {
     const s = buildShards();
-    const book = await loadBook(exportOf('100', 5, s.prices, s.detail), { fetch: s.fetch, concurrency: 2 });
+    const book = await loadBook(exportOf('100', 5, s.files), { fetch: s.fetch, concurrency: 2 });
 
     expect(book).toMatchObject({ epoch: '100', seq: 5, feeBps: 300, level: 'full' });
     expect(book.listings.size).toBe(3);
     expect(book.listings.get(L1)).toEqual({
-      id: L1, itemId: ITEM_A, phase: 'Ruby', priceCents: 10025, instant: true, detail: { wear: 0.01, assetId: '44001' },
+      id: L1, itemId: ITEM_A, name: 'Knife', phase: 'Ruby', priceCents: 10025, instant: true, detail: { wear: 0.01, assetId: '44001' },
     });
-    expect(book.listings.get(L2)).toEqual({ id: L2, itemId: ITEM_A, phase: null, priceCents: 990, instant: false });
+    expect(book.listings.get(L2)).toEqual({ id: L2, itemId: ITEM_A, name: 'Knife', phase: null, priceCents: 990, instant: false });
     expect(book.listings.get(L3)?.priceCents).toBe(300);
   });
 
-  it('keeps only the named items and skips detail when asked', async () => {
+  it('keeps only the named items', async () => {
     const s = buildShards();
-    const book = await loadBook(exportOf('100', 5, s.prices, s.detail), { fetch: s.fetch, items: [ITEM_A], detail: false });
+    const book = await loadBook(exportOf('100', 5, s.files), { fetch: s.fetch, items: [ITEM_A] });
 
     expect([...book.listings.keys()].sort()).toEqual([L1, L2]);
-    expect(book.listings.get(L1)?.detail).toBeUndefined();
   });
 
   it('refuses a shard whose hash does not match', async () => {
     const s = buildShards();
-    const tampered = s.prices.map((l, i) => (i === 0 ? { ...l, sha256: '0'.repeat(64) } : l));
+    const tampered = s.files.map((l, i) => (i === 0 ? { ...l, sha256: '0'.repeat(64) } : l));
 
-    const err = await loadBook(exportOf('100', 5, tampered, null), { fetch: s.fetch }).catch((e: unknown) => e);
+    const err = await loadBook(exportOf('100', 5, tampered), { fetch: s.fetch }).catch((e: unknown) => e);
     expect(isError(err, 'SDK_BOOK_SHARD_INVALID')).toBe(true);
   });
 
   it('refuses a shard whose row count does not match', async () => {
     const s = buildShards();
-    const short = s.prices.map((l, i) => (i === 1 ? { ...l, rows: 2 } : l));
+    const short = s.files.map((l, i) => (i === 1 ? { ...l, rows: 2 } : l));
 
-    const err = await loadBook(exportOf('100', 5, short, null), { fetch: s.fetch }).catch((e: unknown) => e);
+    const err = await loadBook(exportOf('100', 5, short), { fetch: s.fetch }).catch((e: unknown) => e);
     expect(isError(err, 'SDK_BOOK_SHARD_INVALID')).toBe(true);
   });
 
@@ -332,9 +331,9 @@ describe('market.syncExport', () => {
     const s = buildShards();
     const notReady = { requestId: 'n', success: false, error: { code: 1, key: 'EXPORT_NOT_READY', message: 'wait' } };
     nock(BASE)
-      .get('/market/export').reply(200, { requestId: 'e1', success: true, data: exportOf('100', 5, s.prices, s.detail) })
+      .get('/market/export').reply(200, { requestId: 'e1', success: true, data: exportOf('100', 5, s.files) })
       .get('/market/export').reply(503, notReady)
-      .get('/market/export').reply(200, { requestId: 'e2', success: true, data: exportOf('200', 9, s.prices, null) });
+      .get('/market/export').reply(200, { requestId: 'e2', success: true, data: exportOf('200', 9, s.files) });
     mintTokens(2);
     const sdk = new Skinshark({ apiKey: API_KEY, retries: false });
     const errors: unknown[] = [];
@@ -368,7 +367,7 @@ describe('market.syncExport', () => {
     expect(second.sent[0]).toEqual({ op: 'subscribe', channels: ['listings'], epoch: '200', since: 9 });
     expect(readies).toBe(2);
     expect(book.listings.size).toBe(3);
-    expect(book.listings.get(L1)?.detail).toBeUndefined();
+    expect(book.listings.get(L1)?.itemId).toBe(ITEM_A);
     expect(errors.some((e) => isError(e, 'EXPORT_NOT_READY'))).toBe(true);
     book.close();
   });

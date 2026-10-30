@@ -3177,12 +3177,9 @@ paths:
         refused.
 
         Short-lived signed links to the latest full-depth build of the combined book, priced for
-        your fee tier and stripped to your level. Shards are gzipped NDJSON, one JSON array per
-        line:
-
-        - price shards: `[id, itemId, phase, price, instant]`, `price` a fee-inclusive decimal
-          string ("12.34"), `instant` 0|1;
-        - detail shards (extended/full only): `[id, detail]`; listings without detail are omitted.
+        your fee tier and stripped to your level. Shards are gzipped NDJSON, one listing per line
+        as a named object: `id`, `itemId`, `name`, `phase`, `price` (a fee-inclusive decimal
+        string, "12.34"), `instant`, then the detail fields of your level.
 
         Check each shard's `bytes`, `sha256` (hex, over the gzipped bytes) and `rows`, then resume
         the stream (`wss://stream.skinshark.gg/market/stream`) from the build's
@@ -3206,7 +3203,7 @@ paths:
                     properties:
                       data:
                         type: object
-                        required: [epoch, seq, builtAt, listings, feeBps, level, prices, detail, expiresAt, stream]
+                        required: [epoch, seq, builtAt, listings, feeBps, level, files, expiresAt, stream]
                         properties:
                           epoch: { type: string }
                           seq: { type: integer, minimum: 0 }
@@ -3214,11 +3211,8 @@ paths:
                           listings: { type: integer, minimum: 0 }
                           feeBps: { type: integer, minimum: 0 }
                           level: { type: string, enum: [minimal, extended, full] }
-                          prices:
+                          files:
                             type: array
-                            items: { $ref: '#/components/schemas/BookShardLink' }
-                          detail:
-                            type: [array, 'null']
                             items: { $ref: '#/components/schemas/BookShardLink' }
                           expiresAt: { type: string, format: date-time }
                           stream:

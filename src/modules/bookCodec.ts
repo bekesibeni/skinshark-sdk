@@ -5,10 +5,12 @@ export interface BookListing {
   id: string;
   /** 16-hex catalog item id. */
   itemId: string;
+  /** The skin's market name. Only a build carries it, so a listing added by a frame has none. */
+  name?: string;
   phase: string | null;
   priceCents: number;
   instant: boolean;
-  /** Absent at the minimal level and for listings the build had no detail for. */
+  /** Absent when no detail field applies to the listing. */
   detail?: BookDetail;
 }
 
@@ -146,21 +148,20 @@ export function decodeBookFrame(wire: WireBookFrame): BookFrame {
   };
 }
 
-/** A price shard line: `[id, itemId, phase, price, instant]`. */
-export function parsePriceLine(line: string): BookListing {
-  const [id, itemId, phase, price, instant] = JSON.parse(line) as [
-    string,
-    string,
-    string | null,
-    string,
-    0 | 1,
-  ];
-  return { id, itemId, phase, priceCents: decimalToCents(price), instant: instant === 1 };
-}
-
-/** A detail shard line: `[id, detail]`. */
-export function parseDetailLine(line: string): [string, BookDetail] {
-  return JSON.parse(line) as [string, BookDetail];
+/** One line of a build's shard: a whole listing as a named object. */
+export function parseExportLine(line: string): BookListing {
+  const { id, itemId, name, phase, price, instant, ...detail } = JSON.parse(line) as {
+    id: string;
+    itemId: string;
+    name: string | null;
+    phase: string | null;
+    price: string;
+    instant: boolean;
+  } & BookDetail;
+  const l: BookListing = { id, itemId, phase, priceCents: decimalToCents(price), instant };
+  if (name) l.name = name;
+  if (Object.keys(detail).length > 0) l.detail = detail;
+  return l;
 }
 
 /**

@@ -8,8 +8,7 @@ import {
   itemIdOf,
   judgeFrame,
   listingIdOf,
-  parseDetailLine,
-  parsePriceLine,
+  parseExportLine,
   type BookListing,
   type WireBookFrame,
 } from '../../src/modules/bookCodec.js';
@@ -115,18 +114,20 @@ describe('decodeBookFrame', () => {
 });
 
 describe('shard lines', () => {
-  it('parses a price line and a detail line', () => {
-    expect(parsePriceLine(JSON.stringify([LISTING, ITEM, null, '5.42', 1]))).toEqual({
+  it('reads a line as a listing, with what is left over as its detail', () => {
+    const line = { id: LISTING, itemId: ITEM, name: 'Knife', phase: null, price: '5.42', instant: true };
+    expect(parseExportLine(JSON.stringify(line))).toEqual({
       id: LISTING,
       itemId: ITEM,
+      name: 'Knife',
       phase: null,
       priceCents: 542,
       instant: true,
     });
-    expect(parseDetailLine(JSON.stringify([LISTING, { stickers: ['a'], assetId: '44001' }]))).toEqual([
-      LISTING,
-      { stickers: ['a'], assetId: '44001' },
-    ]);
+    expect(parseExportLine(JSON.stringify({ ...line, stickers: ['a'], assetId: '44001' })).detail).toEqual({
+      stickers: ['a'],
+      assetId: '44001',
+    });
   });
 
   it('splits lines across chunk boundaries, multi-byte characters included, and skips blanks', async () => {

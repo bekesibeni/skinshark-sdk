@@ -715,15 +715,13 @@ export interface BookExportResponse {
   /** The fee tier every price in the build carries. */
   feeBps: number;
   level: BookDataLevel;
-  /** Price shards: `[id, itemId, phase, price, instant]` lines, price fee-inclusive ("12.34"). */
-  prices: BookShardLink[];
-  /** Detail shards (`[id, detail]` lines), null at the minimal level. */
-  detail: BookShardLink[] | null;
+  /** The build's shards. Each line is a whole listing at your level, price fee-inclusive ("12.34"). */
+  files: BookShardLink[];
   expiresAt: string;
   stream: { path: string; encodings: BookStreamEncoding[] };
 }
 
-/** Per-listing detail. Extended adds wear, seed, paint index and stickers; full adds the rest. */
+/** Per-listing detail. Minimal: wear and seed. Extended adds paint index and stickers; full adds the rest. */
 export interface BookDetail {
   wear?: number;
   seed?: number;

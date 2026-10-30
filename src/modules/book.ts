@@ -18,8 +18,7 @@ import type { ErrorKey } from '../types/errors.js';
 import {
   applyBookFrame,
   eachLine,
-  parseDetailLine,
-  parsePriceLine,
+  parseExportLine,
   type BookFrame,
   type BookListing,
   type BookPosition,
@@ -42,8 +41,6 @@ export interface BookExport extends BookExportResponse {
 }
 
 export interface LoadBookOptions {
-  /** Join the detail shards when the level has them. Defaults to true. */
-  detail?: boolean;
   /** Keep only these item ids. Every row is still counted against the shard's `rows`. */
   items?: Iterable<string>;
   /** Shards downloaded at once. Defaults to 4. */
@@ -173,8 +170,8 @@ async function eachLimit<T>(
 }
 
 /**
- * Downloads an export's shards, checks each one's bytes, sha256 and row count, and joins detail
- * onto prices by listing id. Resume the stream from the returned `{ epoch, seq }`.
+ * Downloads an export's shards and checks each one's bytes, sha256 and row count. Resume the
+ * stream from the returned `{ epoch, seq }`.
  */
 export async function loadBook(exp: BookExportResponse, opts: LoadBookOptions = {}): Promise<LoadedBook> {
   const f = opts.fetch ?? globalThis.fetch;
@@ -182,25 +179,13 @@ export async function loadBook(exp: BookExportResponse, opts: LoadBookOptions = 
   const keep = opts.items ? new Set(opts.items) : null;
   const listings = new Map<string, BookListing>();
 
-  await eachLimit(exp.prices, concurrency, async (link) => {
+  await eachLimit(exp.files, concurrency, async (link) => {
     const gz = await download(link, f, opts.signal);
     await eachShardLine(link, gz, (line) => {
-      const l = parsePriceLine(line);
+      const l = parseExportLine(line);
       if (!keep || keep.has(l.itemId)) listings.set(l.id, l);
     });
   });
-
-  // After every price shard: a detail line joins onto a listing that must already be there.
-  if (opts.detail !== false && exp.detail) {
-    await eachLimit(exp.detail, concurrency, async (link) => {
-      const gz = await download(link, f, opts.signal);
-      await eachShardLine(link, gz, (line) => {
-        const [id, detail] = parseDetailLine(line);
-        const l = listings.get(id);
-        if (l) l.detail = detail;
-      });
-    });
-  }
 
   return { epoch: exp.epoch, seq: exp.seq, feeBps: exp.feeBps, level: exp.level, listings };
 }
@@ -246,11 +231,10 @@ export function syncBook(
   handlers: SyncBookHandlers,
   opts: SyncBookOptions = {},
 ): SyncedBook {
-  const { channels = ['listings'], items, retry, detail, concurrency, signal, fetch: f, ...rest } = opts;
+  const { channels = ['listings'], items, retry, concurrency, signal, fetch: f, ...rest } = opts;
   const baseDelay = retry?.baseDelayMs ?? 1_000;
   const maxDelay = retry?.maxDelayMs ?? 60_000;
   const loadOpts: LoadBookOptions = {};
-  if (detail !== undefined) loadOpts.detail = detail;
   if (concurrency !== undefined) loadOpts.concurrency = concurrency;
   if (signal !== undefined) loadOpts.signal = signal;
   if (f !== undefined) loadOpts.fetch = f;

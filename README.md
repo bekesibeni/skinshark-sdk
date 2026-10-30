@@ -264,13 +264,13 @@ const book = sdk.market.syncExport({
   onError: (e, fatal) => { if (fatal) console.error('book stopped', e); },
 });
 await book.ready;                       // first load done; throws MARKET_DATA_NOT_ENABLED etc.
-const l = book.listings.get(listingId); // { id, itemId, phase, priceCents, instant, detail? }
+const l = book.listings.get(listingId); // { id, itemId, name?, phase, priceCents, instant, detail? }
 book.close();
 ```
 
 `syncExport` follows every listing by default (the `listings` firehose entitlement); pass
-`{ items: ['<16-hex item id>', …] }` to load and follow only those, `channels: ['listings', 'prices']`
-to also get per-item tops on `onFrame`, and `detail: false` to skip the detail shards.
+`{ items: ['<16-hex item id>', …] }` to load and follow only those, and `channels: ['listings', 'prices']`
+to also get per-item tops on `onFrame`. `name` comes from the export, so a listing a frame added has none until the next load.
 
 The parts are usable on their own:
 
