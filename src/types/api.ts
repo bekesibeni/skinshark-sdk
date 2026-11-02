@@ -757,6 +757,8 @@ export interface BuyItem {
   /** `same_item`: if the listing is gone by purchase time, buy the cheapest other listing of the
    *  same item, phase and delivery tier at or under `maxPrice` instead. Default `none`. */
   fallback?: 'none' | 'same_item';
+  /** Never fill below this `revertRefundPercent`, on this listing or on any fallback or failover. Default: no minimum. */
+  minRevertRefundPercent?: number;
 }
 
 export interface BuyBody {
@@ -785,6 +787,8 @@ export interface QuickBuyBody {
   externalId?: string;
   /** One ref per requested unit, applied in order. Must be exactly `amount` entries. */
   externalIds?: string[];
+  /** Never fill below this `revertRefundPercent`, on any market. Default: no minimum. */
+  minRevertRefundPercent?: number;
 }
 
 export interface QuickBuyResponse {
@@ -840,6 +844,8 @@ export interface TradeItem {
    * `revertRefundPercent` named, possibly 0. Sell items never carry it.
    */
   refundAmount?: number;
+  /** The buyer-revert refund share of the order actually placed. Absent until it fills, or if unknown. Sell items never carry it. */
+  revertRefundPercent?: number;
 }
 
 export interface Trade {

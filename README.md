@@ -145,6 +145,13 @@ const trade = await sdk.market.buy(
 // replaced by the cheapest copy of the same item at or under maxPrice.
 await sdk.market.buy([{ listingId: 'uuid-of-listing', maxPrice: '5.50', fallback: 'same_item' }]);
 
+// minRevertRefundPercent: never fill below this refund share on a buyer revert, on this listing or on
+// any fallback or failover. A listing that names no share counts as 0; one already under it is
+// refused with REVERT_REFUND_BELOW_MINIMUM before any money moves.
+await sdk.market.buy([
+  { listingId: 'uuid-of-listing', maxPrice: '5.50', fallback: 'same_item', minRevertRefundPercent: 70 },
+]);
+
 // Quick-buy: server picks N cheapest matching listings
 const filled = await sdk.market.quickBuy(
   { itemId: 'item-id', maxPrice: '5.00', amount: 20, delivery: 'instant' },
