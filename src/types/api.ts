@@ -12,7 +12,7 @@ export interface Envelope<T> {
 }
 
 // ── Enums (mirror prisma/schema.prisma) ──────────────────────────────
-export type Currency = 'USD' | 'EUR';
+export type Currency = 'USD';
 export type UserStatus = 'active' | 'suspended' | 'deleted';
 export type Role = 'user' | 'merchant' | 'admin';
 export type TwoFactorMethod = 'email' | 'totp';
@@ -837,6 +837,13 @@ export interface TradeItem {
    * cleared (the listing was simply taken first).
    */
   minPrice?: number;
+  /**
+   * Listing buys only. On a `failed` item with error `PRICE_CHANGED`, when the listing was repriced
+   * above your `maxPrice` before it filled: what the same listing costs now, fee-inclusive like
+   * `price`. Send a new buy for the listing with a `maxPrice` at or above it to buy it anyway.
+   * Absent when the market refused without naming the new price.
+   */
+  newPrice?: number;
   /**
    * Present only on refunded buy items (failed/canceled/declined/reverted): what was returned to your
    * balance, in the trade currency. Equals `price` on everything except a buyer revert after delivery

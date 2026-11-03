@@ -75,7 +75,7 @@ u.id          // SubUserUuid (UUID)
 u.externalId  // your external id, if you set one
 u.email
 u.steamId
-u.currency    // 'USD' | 'EUR' | null
+u.currency    // 'USD' | null
 u.balance     // spot wallet snapshot
 u.status      // 'active' | 'suspended' | 'deleted'
 u.feeBps
@@ -543,7 +543,7 @@ PayoutWithdrawalStatus  pending_callback / queued / broadcast / confirmed / refu
 CryptoEvmChain          ethereum / base / arbitrum / optimism / bsc
 ```
 
-(Currency / token symbols like `USD`, `EUR`, `USDT`, `USDC` are uppercase per
+(Currency / token symbols like `USD`, `USDT`, `USDC` are uppercase per
 their domain convention. CS2 community labels like `StatTrak` and `Phase 1`
 keep their natural casing.)
 

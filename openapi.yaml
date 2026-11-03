@@ -216,7 +216,7 @@ components:
     # ─────────────────────────────────────────────────────────────────────
     # Enums (mirror prisma/schema.prisma)
     # ─────────────────────────────────────────────────────────────────────
-    Currency: { type: string, enum: [USD, EUR] }
+    Currency: { type: string, enum: [USD] }
     UserStatus: { type: string, enum: [active, suspended, deleted] }
     Role: { type: string, enum: [user, merchant, admin] }
     TwoFactorMethod: { type: string, enum: [email, totp] }
@@ -367,7 +367,7 @@ components:
         feeBps: { type: [integer, "null"] }
         currency:
           type: [string, "null"]
-          enum: [USD, EUR, null]
+          enum: [USD, null]
         balance: { type: number }
         createdAt: { type: string, format: date-time }
 
@@ -1464,6 +1464,13 @@ components:
         errorDetail:
           type: string
           description: 'Raw marketplace reason for debugging (e.g. "c5:ITEM_SOLD item already sold"). Not stable — do not branch on it.'
+        newPrice:
+          type: number
+          description: |
+            Listing buys only. Set on a `failed` item with error `PRICE_CHANGED` when the listing was repriced
+            above your `maxPrice` before it filled: what the same listing costs now, fee-inclusive like `price`, so
+            the two compare directly. To buy it anyway, send a new buy for the same listing with a
+            `maxPrice` at or above it. Absent when the market refused without naming the new price.
         refundAmount:
           type: number
           description: |
@@ -1680,7 +1687,7 @@ components:
         id: { type: string, format: uuid }
         status: { $ref: '#/components/schemas/TradeStatus' }
         itemCount: { type: integer }
-        totalPrice: { type: number, description: 'Total payout in the wallet currency, at a locked FX rate.' }
+        totalPrice: { type: number, description: 'Total payout in the wallet currency.' }
         currency: { $ref: '#/components/schemas/Currency' }
         createdAt: { type: string }
 
@@ -2152,12 +2159,10 @@ paths:
         **Auth context:** merchant only. **Rate limit: 100 / 5min.**
 
         Requires `Idempotency-Key`. Replay returns the original transaction id
-        with `idempotent: true`. The sub-user's wallet currency must match the
-        merchant's spot currency.
+        with `idempotent: true`.
 
         Common error keys:
         - `INSUFFICIENT_BALANCE` (1500)
-        - `TRANSFER_CURRENCY_MISMATCH` (1520)
         - `IDEMPOTENCY_KEY_REQUIRED` (1511) / `IDEMPOTENCY_CONFLICT` (1510)
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }

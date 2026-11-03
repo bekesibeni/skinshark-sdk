@@ -32,7 +32,7 @@ describe('integration — wire-compat probe', () => {
     const w = await sdk.account.wallet({ type: 'spot' });
     expect(typeof w.walletId).toBe('string');
     expect(typeof w.balance).toBe('number');
-    expect(['USD', 'EUR']).toContain(w.currency);
+    expect(w.currency).toBe('USD');
     console.log('wallet', w);
   });
 

@@ -49,17 +49,17 @@ describe('users.fund — idempotency', () => {
     expect(result.idempotent).toBe(true);
   });
 
-  it('surfaces TRANSFER_CURRENCY_MISMATCH cleanly', async () => {
+  it('surfaces INSUFFICIENT_BALANCE cleanly', async () => {
     nock(BASE)
       .post('/merchant/users/u1/fund')
       .reply(422, {
         requestId: 'req-f3', success: false,
-        error: { code: 1710, key: 'TRANSFER_CURRENCY_MISMATCH', message: 'Currency mismatch' },
+        error: { code: 1500, key: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' },
       });
 
     const sdk = new Skinshark({ apiKey: API_KEY, retries: false });
     await expect(sdk.users.fund('u1', { amount: '50.00' })).rejects.toMatchObject({
-      key: 'TRANSFER_CURRENCY_MISMATCH', code: 1710,
+      key: 'INSUFFICIENT_BALANCE', code: 1500,
     });
   });
 });
