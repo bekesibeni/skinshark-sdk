@@ -5,7 +5,7 @@ export interface BookListing {
   id: string;
   /** 16-hex catalog item id. */
   itemId: string;
-  /** The skin's market name. Only a build carries it, so a listing added by a frame has none. */
+  /** The skin's market name. Absent only on frames from a server that predates names on adds. */
   name?: string;
   phase: string | null;
   priceCents: number;
@@ -67,7 +67,7 @@ export interface WireBookFrame {
   epoch: string;
   seq: number;
   t: number;
-  adds: [WireId, WireId, string | null, WirePrice, WireFlag, BookDetail | null][];
+  adds: [WireId, WireId, string | null, WirePrice, WireFlag, BookDetail | null, (string | null)?][];
   prices: [WireId, WireId, WirePrice, WireFlag][];
   removes: [WireId, WireId][];
   tops: [WireId, string | null, WirePrice | null, WirePrice | null, number, number][];
@@ -114,7 +114,7 @@ function flagOf(v: WireFlag): boolean {
 export function decodeBookFrame(wire: WireBookFrame): BookFrame {
   const adds: BookListing[] = new Array(wire.adds.length);
   for (let i = 0; i < wire.adds.length; i++) {
-    const [id, itemId, phase, price, instant, detail] = wire.adds[i]!;
+    const [id, itemId, phase, price, instant, detail, name] = wire.adds[i]!;
     const l: BookListing = {
       id: listingIdOf(id),
       itemId: itemIdOf(itemId),
@@ -122,6 +122,7 @@ export function decodeBookFrame(wire: WireBookFrame): BookFrame {
       priceCents: centsOf(price),
       instant: flagOf(instant),
     };
+    if (name) l.name = name;
     if (detail) l.detail = detail;
     adds[i] = l;
   }
